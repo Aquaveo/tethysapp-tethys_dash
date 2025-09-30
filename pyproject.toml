@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tethysapp-tethysdash"
+version = "0.13.2"
+description = "A Tethys App for no code/low code web application development app"
+authors = [{ name = "Corey Krewson", email = "ckrewson@aquaveo.com" }]
+license = { text = "MIT" }
+keywords = [""]
+dependencies = [
+    "hjson==3.1",
+    "nh3==0.2.21",
+    "bleach==6.1.0",
+    "bleach[css]",
+    "cssutils==2.11.1",
+    "pytest-django",
+    "pytest-mock",
+    "pytest-cov",
+    "intake==2.0.7",
+    "djangorestframework",
+    "alembic==1.14.0",
+    "xmltodict==0.14.2"
+]
+classifiers = [
+     "Environment :: Web Environment",
+     "Framework :: Django",
+     "Intended Audience :: Developers",
+     "License :: OSI Approved :: MIT",
+     "Operating System :: OS Independent",
+     "Programming Language :: Python",
+     "Programming Language :: Python :: 3",
+     "Programming Language :: Python :: 3.10",
+     "Topic :: Internet :: WWW/HTTP",
+     "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+# Find namespace packages like `tethysapp.tethysdash`
+include = ["tethysapp*"]
+
+[tool.setuptools.package-data]
+# The key "" applies to all packages
+"*" = [
+    "alembic.ini",
+    "public/**/*",
+    "*.js",
+    "*.png",
+    "*.gif",
+    "*.jpg",
+    "*.html",
+    "*.css",
+    "*.gltf",
+    "*.json",
+    "*.geojson",
+    "*.svg",
+]
+
+# Optional: for compatibility with pytest if you run tests with `pytest`
+[tool.pytest.ini_options]
+django_find_project = false
