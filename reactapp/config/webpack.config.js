@@ -97,7 +97,7 @@ module.exports = (env, argv) => {
     devServer: {
       proxy: {
         "!/static/tethysdash/frontend/**": {
-          target: "http://localhost:8000", // points to django dev server
+          target: "http://127.0.0.1:8000", // points to django dev server
           changeOrigin: true,
         },
       },

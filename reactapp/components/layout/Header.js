@@ -1,11 +1,10 @@
 import PropTypes from "prop-types";
-import { useContext, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Container from "react-bootstrap/Container";
-import Navbar from "react-bootstrap/Navbar";
 import Spinner from "react-bootstrap/Spinner";
 import styled from "styled-components";
-
+import Cw3eHeader from "./cw3eHeader";
 import {
   LayoutContext,
   EditingContext,
@@ -24,9 +23,7 @@ import {
   useLayoutErrorAlertContext,
 } from "components/contexts/LayoutAlertContext";
 import { getTethysPortalHost } from "services/utilities";
-
 import {
-  BsX,
   BsGear,
   BsGrid3X3Gap,
   BsInfo,
@@ -53,21 +50,20 @@ const StyledSpinner = styled(Spinner)`
   margin-right: 0.5rem;
 `;
 
-const CustomNavBar = styled(Navbar)`
-  min-height: var(--ts-header-height);
+const CustomDiv = styled.div`
+  top: 40%;
+  right: 0;
+  width: fit-content;
 `;
 
-const TitleDiv = styled.div`
-  justify-content: center;
-`;
 
 const WhiteTitle = styled.h1`
-  position: absolute;
-  left: 50%;
-  top: 0;
-  transform: translateX(-50%);
+  position: relative;
+  width: 100%;
+  margin: 0.5rem 0;
+  text-align: center;
   white-space: nowrap;
-  color: white;
+  color: black;
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
@@ -115,15 +111,20 @@ export const LandingPageHeader = () => {
     Array.isArray(userAppPermissions) &&
     userAppPermissions.includes("manage_visualizations");
 
+  useEffect(() => {
+    document.body.classList.add("has-cw3e-header");
+    return () => {
+      document.body.classList.remove("has-cw3e-header");
+    };
+  }, []);
+
   return (
     <>
-      <CustomNavBar fixed="top" bg="primary" variant="dark" className="shadow">
-        <Container as="header" fluid className="px-4">
-          <TitleDiv>
-            <WhiteTitle>Available Dashboards</WhiteTitle>
-          </TitleDiv>
-          <div>
-            {user?.username ? (
+      <Cw3eHeader />
+      <CustomDiv className="d-flex flex-column position-absolute">
+        <Container fluid className="px-2 d-flex justify-content-end">
+          <div className="d-flex flex-column align-items-center gap-2">
+            {user?.username && (
               <>
                 {allowedToManageVisualizations && (
                   <TooltipButton
@@ -164,19 +165,6 @@ export const LandingPageHeader = () => {
                   <BsInfo size="1.5rem" />
                 </TooltipButton>
               </>
-            ) : (
-              <TooltipButton
-                onClick={() => {
-                  window.location.assign(
-                    `${TETHYS_PORTAL_HOST}/accounts/login?next=${window.location.pathname}`
-                  );
-                }}
-                tooltipPlacement="bottom"
-                tooltipText="Login"
-                aria-label={"dashboardLoginButton"}
-              >
-                <BsFillPersonFill size="1.5rem" />
-              </TooltipButton>
             )}
             {user.isStaff && (
               <TooltipButton
@@ -188,17 +176,10 @@ export const LandingPageHeader = () => {
                 <BsGear size="1.5rem" />
               </TooltipButton>
             )}
-            <TooltipButton
-              href={tethysApp.exitUrl}
-              tooltipPlacement="bottom"
-              tooltipText="Exit TethysDash"
-              aria-label={"appExitButton"}
-            >
-              <BsX size="1.5rem" />
-            </TooltipButton>
           </div>
         </Container>
-      </CustomNavBar>
+      </CustomDiv>
+ 
       {showInfoModal && (
         <AppInfoModal
           showModal={showInfoModal}
@@ -343,8 +324,15 @@ export const DashboardHeader = () => {
 
   return (
     <>
-      <CustomNavBar fixed="top" bg="primary" variant="dark" className="shadow">
-        <Container as="header" fluid className="px-4">
+      <Cw3eHeader />
+
+      <WhiteTitle>{name}</WhiteTitle>
+      <CustomDiv className="d-flex flex-column position-absolute">
+        <Container
+          as="header"
+          fluid
+          className="px-2 d-flex flex-column align-items-end dashboard-header-container z-3"
+        >
           <TooltipButton
             onClick={() => {
               navigate("/");
@@ -357,8 +345,7 @@ export const DashboardHeader = () => {
           >
             <BsGrid3X3Gap size="1.5rem" />
           </TooltipButton>
-          <WhiteTitle>{name}</WhiteTitle>
-          <div>
+          <div className="dashboard-header-actions">
             {editable && (
               <>
                 {isEditing ? (
@@ -474,7 +461,7 @@ export const DashboardHeader = () => {
             </TooltipButton>
           </div>
         </Container>
-      </CustomNavBar>
+      </CustomDiv>
       {showEditCanvas && (
         <DashboardEditorCanvas
           showCanvas={showEditCanvas}

@@ -21,7 +21,7 @@ const TooltipButton = ({
       href={href}
       variant={props.variant ? props.variant : "info"}
       size="sm"
-      className={`me-2 ${props.className}`}
+      className={`me-2 ${props.className} text-white`}
     >
       {children}
     </Button>

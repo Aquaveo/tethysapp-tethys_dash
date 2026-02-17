@@ -1,5 +1,6 @@
 import { useContext } from "react";
 import { LandingPageHeader } from "components/layout/Header";
+import CW3EFooter from "components/layout/cw3eFooter";
 import {
   AppContext,
   AvailableDashboardsContext,
@@ -56,6 +57,7 @@ const LandingPage = () => {
           )}
         </StyledRow>
       </StyledContainer>
+      <CW3EFooter />
     </LayoutAlertContextProvider>
   );
 };
