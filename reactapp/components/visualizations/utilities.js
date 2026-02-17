@@ -1,5 +1,10 @@
 import appAPI from "services/api/app";
 import { spaceAndCapitalize } from "components/modals/utilities";
+import {
+  parseDateMath,
+  convertDatesToLocalISO,
+} from "components/inputs/dateUtils";
+import { format } from "date-fns";
 
 export function checkForEmptyVariableInputs({
   metadataString,
@@ -15,7 +20,7 @@ export function checkForEmptyVariableInputs({
       if (!variableInputValues[dependentVariableInput]) {
         warnings.push(
           metadata.customMessaging?.[dependentVariableInput] ??
-            `${dependentVariableInput} variable is empty`
+            `${dependentVariableInput} variable is empty`,
         );
       }
     }
@@ -39,12 +44,15 @@ export function findVisualizationBySource(data, targetSource) {
   return null;
 }
 
-function getDependentVariableInputs(args) {
+export function getDependentVariableInputs(args) {
   const regex = /\${(.*?)}/g; // Matches ${...}
   const uniqueValues = new Set();
 
-  let match;
-  while ((match = regex.exec(args)) !== null) {
+  if (typeof args !== "string") {
+    args = JSON.stringify(args);
+  }
+
+  for (const match of args.matchAll(regex)) {
     uniqueValues.add(match[1]); // Extract the variable name
   }
 
@@ -61,6 +69,7 @@ export async function getVisualization({
   variableInputValues,
   dashboardView,
   vizLoadingIcon = true,
+  variableInputDateFormats = {},
 }) {
   const metadata = JSON.parse(metadataString);
   const emptyVariableWarnings = checkForEmptyVariableInputs({
@@ -107,6 +116,13 @@ export async function getVisualization({
     setVizType("loader");
   }
 
+  itemData.args = updateObjectWithVariableInputs(
+    JSON.parse(argsString),
+    variableInputValues,
+    variableInputDateFormats,
+    true,
+  );
+
   const apiResponse = await appAPI.getVisualizationData(itemData);
   if (apiResponse.success === true) {
     let responseData = JSON.parse(JSON.stringify(apiResponse.data));
@@ -117,7 +133,7 @@ export async function getVisualization({
     if (dashboardView) {
       responseData = updateObjectWithVariableInputs(
         responseData,
-        variableInputValues
+        variableInputValues,
       );
     }
 
@@ -180,8 +196,15 @@ export async function getVisualization({
       setVizData({
         variable_name: responseData.variable_name,
         initial_value: responseData.initial_value,
+        show_label: responseData.show_label,
         variable_options_source: responseData.variable_options_source,
         metadata: responseData.metadata,
+      });
+    } else if (apiResponse.viz_type === "Live Chat") {
+      setVizType("liveChat");
+      setVizData({
+        requestId: itemData.requestId,
+        chatHistory: responseData.chatHistory,
       });
     } else {
       setVizType("vizWarning");
@@ -210,42 +233,88 @@ export function getGridItem(gridItems, gridItemI) {
   return result;
 }
 
-export function updateObjectWithVariableInputs(args, variableInputs) {
-  for (let gridItemsArg in args) {
-    let value = args[gridItemsArg];
+export function updateObjectWithVariableInputs(
+  args,
+  variableInputs,
+  variableInputDateFormats,
+  returnDatesAsLocalISO = false,
+) {
+  const argsCopy = JSON.parse(JSON.stringify(args));
+  const variableInputsCopy = JSON.parse(JSON.stringify(variableInputs));
+
+  if (variableInputDateFormats) {
+    for (let [variableInputKey, variableInputValue] of Object.entries(
+      variableInputs,
+    )) {
+      const dateFormat = variableInputDateFormats[variableInputKey];
+      if (dateFormat) {
+        const updatedValue = parseDateMath({
+          value: variableInputValue,
+          dateFormat: dateFormat,
+        });
+        if (returnDatesAsLocalISO) {
+          variableInputsCopy[variableInputKey] =
+            convertDatesToLocalISO(updatedValue);
+        } else {
+          variableInputsCopy[variableInputKey] = format(
+            updatedValue,
+            dateFormat,
+          );
+        }
+      }
+    }
+  }
+
+  for (let gridItemsArg in argsCopy) {
+    let value = argsCopy[gridItemsArg];
 
     if (typeof value !== "string") {
       value = JSON.stringify(value);
     }
+
     let updatedValuesWithVariableInputs = value.replace(
       /\$\{([^}]+)\}/g,
       (_, key) =>
-        typeof variableInputs[key] === "object"
-          ? JSON.stringify(variableInputs[key])
-          : (variableInputs[key] ?? "")
+        typeof variableInputsCopy[key] === "object"
+          ? JSON.stringify(variableInputsCopy[key])
+          : (variableInputsCopy[key] ?? ""),
     );
 
-    if (typeof args[gridItemsArg] !== "string") {
+    if (typeof argsCopy[gridItemsArg] !== "string") {
       updatedValuesWithVariableInputs = JSON.parse(
-        updatedValuesWithVariableInputs
+        updatedValuesWithVariableInputs,
       );
     }
-    args[gridItemsArg] = updatedValuesWithVariableInputs;
+    argsCopy[gridItemsArg] = updatedValuesWithVariableInputs;
   }
 
-  return args;
+  return argsCopy;
 }
 
 export const nonDropDownVariableInputTypes = [
   "text",
   "number",
   "checkbox",
-  "date",
-  "date-hour",
+  { label: "date", value: "date", sub_args: { metadata: "date-format" } },
+  {
+    label: "date-hour (deprecated, use date instead)",
+    value: "date-hour",
+    sub_args: { metadata: "date-format" },
+  },
+  {
+    label: "date-range",
+    value: "date-range",
+    sub_args: { metadata: "custom-DateRangeMetadata" },
+  },
   {
     value: "slider",
     label: "slider",
     sub_args: { metadata: "custom-SliderMetadata" },
+  },
+  {
+    value: "csv-uploader",
+    label: "csv uploader",
+    sub_args: { metadata: "custom-CSVUploaderMetadata" },
   },
 ];
 
@@ -347,7 +416,7 @@ export function getBaseMapLayer(baseMapURL) {
 
   const baseMapURLSplit = baseMapURL.split("/");
   const baseMapName = spaceAndCapitalize(
-    baseMapURLSplit[baseMapURLSplit.length - 2]
+    baseMapURLSplit[baseMapURLSplit.length - 2],
   );
   const layer_dict = {
     type: "WebGLTile",
@@ -369,7 +438,7 @@ export function getBaseMapLayer(baseMapURL) {
 export function findSelectOptionByValue(
   data,
   searchValue,
-  searchKey = "value"
+  searchKey = "value",
 ) {
   for (const element of data) {
     if (element[searchKey] === searchValue || element === searchValue) {
@@ -380,7 +449,7 @@ export function findSelectOptionByValue(
       const found = findSelectOptionByValue(
         element.options,
         searchValue,
-        searchKey
+        searchKey,
       ); // Recursively search in options
       if (found) {
         return found; // Return the matching element from nested options

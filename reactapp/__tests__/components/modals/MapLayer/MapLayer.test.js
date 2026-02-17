@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import selectEvent from "react-select-event";
 import MapLayerModal from "components/modals/MapLayer/MapLayer";
-import { AppContext } from "components/contexts/Contexts";
+import { AppContext, LayoutContext } from "components/contexts/Contexts";
 import appAPI from "services/api/app";
 import { getLayerAttributes } from "components/map/utilities";
 import { server } from "__tests__/utilities/server";
@@ -60,12 +60,14 @@ const TestingComponent = ({
   return (
     <>
       <AppContext.Provider value={appContext}>
-        <MapLayerModal
-          showModal={showModal}
-          handleModalClose={handleModalClose}
-          addMapLayer={addMapLayer}
-          layerInfo={layerInfo}
-        />
+        <LayoutContext.Provider value={{ uuid: "123" }}>
+          <MapLayerModal
+            showModal={showModal}
+            handleModalClose={handleModalClose}
+            addMapLayer={addMapLayer}
+            layerInfo={layerInfo}
+          />
+        </LayoutContext.Provider>
       </AppContext.Provider>
     </>
   );
@@ -82,10 +84,10 @@ test("MapLayerModal layer template full map layer", async () => {
             success: true,
             data: fullMapLayer,
           }),
-          ctx.set("Content-Type", "application/json")
+          ctx.set("Content-Type", "application/json"),
         );
-      }
-    )
+      },
+    ),
   );
 
   const handleModalClose = jest.fn();
@@ -97,7 +99,7 @@ test("MapLayerModal layer template full map layer", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -187,10 +189,10 @@ test("MapLayerModal layer template partial map layer", async () => {
               queryable: false,
             },
           }),
-          ctx.set("Content-Type", "application/json")
+          ctx.set("Content-Type", "application/json"),
         );
-      }
-    )
+      },
+    ),
   );
 
   const handleModalClose = jest.fn();
@@ -202,7 +204,7 @@ test("MapLayerModal layer template partial map layer", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -253,10 +255,10 @@ test("MapLayerModal layer template error response", async () => {
           ctx.json({
             success: false,
           }),
-          ctx.set("Content-Type", "application/json")
+          ctx.set("Content-Type", "application/json"),
         );
-      }
-    )
+      },
+    ),
   );
 
   const handleModalClose = jest.fn();
@@ -268,7 +270,7 @@ test("MapLayerModal layer template error response", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -280,7 +282,7 @@ test("MapLayerModal layer template error response", async () => {
   fireEvent.click(templateOption);
 
   expect(
-    await screen.findByText("Failed to load layer template. Check logs.")
+    await screen.findByText("Failed to load layer template. Check logs."),
   ).toBeInTheDocument();
 });
 
@@ -295,10 +297,10 @@ test("MapLayerModal layer template error response, custom error", async () => {
             success: false,
             data: { error: "Error loading layer template" },
           }),
-          ctx.set("Content-Type", "application/json")
+          ctx.set("Content-Type", "application/json"),
         );
-      }
-    )
+      },
+    ),
   );
 
   const handleModalClose = jest.fn();
@@ -310,7 +312,7 @@ test("MapLayerModal layer template error response, custom error", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -322,7 +324,7 @@ test("MapLayerModal layer template error response, custom error", async () => {
   fireEvent.click(templateOption);
 
   expect(
-    await screen.findByText("Error loading layer template")
+    await screen.findByText("Error loading layer template"),
   ).toBeInTheDocument();
 });
 
@@ -336,7 +338,7 @@ test("MapLayerModal new ImageArcGISRest layer", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -392,7 +394,7 @@ test("MapLayerModal new ImageWMS layer", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -461,7 +463,7 @@ test("MapLayerModal new GeoJSON layer", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -494,7 +496,7 @@ test("MapLayerModal new GeoJSON layer", async () => {
   fireEvent.click(createLayerButton);
 
   expect(
-    await screen.findByText("Invalid JSON or failed to fetch/parse the file.")
+    await screen.findByText("Invalid JSON or failed to fetch/parse the file."),
   ).toBeInTheDocument();
 
   fireEvent.change(textArea, {
@@ -543,7 +545,7 @@ test("MapLayerModal new ImageTile layer", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -601,7 +603,7 @@ test("MapLayerModal new VectorTile layer", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -657,7 +659,7 @@ test("MapLayerModal no name error", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   const createLayerButton = await screen.findByLabelText("Create Layer Button");
@@ -665,8 +667,8 @@ test("MapLayerModal no name error", async () => {
 
   expect(
     await screen.findByText(
-      "Layer type and name must be provided in the configuration pane."
-    )
+      "Layer type and name must be provided in the configuration pane.",
+    ),
   ).toBeInTheDocument();
 });
 
@@ -680,7 +682,7 @@ test("MapLayerModal missing required properties", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   const nameInput = await screen.findByLabelText("Name Input");
@@ -704,8 +706,8 @@ test("MapLayerModal missing required properties", async () => {
 
   expect(
     await screen.findByText(
-      "Missing required params arguments. Please check the configuration and try again."
-    )
+      "Missing required params arguments. Please check the configuration and try again.",
+    ),
   ).toBeInTheDocument();
 });
 
@@ -726,7 +728,7 @@ test("MapLayerModal attribute variables and omitted popups", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   const nameInput = await screen.findByLabelText("Name Input");
@@ -799,7 +801,7 @@ test("MapLayerModal legend", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   const nameInput = await screen.findByLabelText("Name Input");
@@ -833,8 +835,8 @@ test("MapLayerModal legend", async () => {
 
   expect(
     await screen.findByText(
-      "Provide a legend title if showing a legend for this layer"
-    )
+      "Provide a legend title if showing a legend for this layer",
+    ),
   ).toBeInTheDocument();
 
   const legendTabContent = screen.getByLabelText("layer-legend-tab");
@@ -845,8 +847,8 @@ test("MapLayerModal legend", async () => {
 
   expect(
     await screen.findByText(
-      "All Legend Items must have a label, color, and symbol"
-    )
+      "All Legend Items must have a label, color, and symbol",
+    ),
   ).toBeInTheDocument();
 
   const legendItemLabel = within(legendTabContent).getAllByRole("textbox")[1];
@@ -880,6 +882,49 @@ test("MapLayerModal legend", async () => {
   });
 });
 
+test("MapLayerModal string legend", async () => {
+  const handleModalClose = jest.fn();
+  const addMapLayer = jest.fn();
+  const layerInfo = {
+    legend: "bad",
+    sourceProps: {
+      props: {
+        url: "Some Url",
+      },
+      type: "ESRI Image and Map Service",
+    },
+
+    layerProps: { name: "New Layer Name" },
+  };
+  render(
+    <TestingComponent
+      showModal={true}
+      handleModalClose={handleModalClose}
+      addMapLayer={addMapLayer}
+      layerInfo={layerInfo}
+    />,
+  );
+
+  const createLayerButton = await screen.findByLabelText("Create Layer Button");
+  fireEvent.click(createLayerButton);
+
+  expect(addMapLayer).toHaveBeenCalledWith({
+    configuration: {
+      props: {
+        name: "New Layer Name",
+        source: {
+          props: {
+            url: "Some Url",
+          },
+          type: "ESRI Image and Map Service",
+        },
+      },
+      type: "ImageLayer",
+    },
+    legend: "bad",
+  });
+});
+
 test("MapLayerModal new GeoJSON layer api fail", async () => {
   const mockUploadJSON = jest.fn();
   jest.spyOn(appAPI, "uploadJSON").mockImplementation(mockUploadJSON);
@@ -894,7 +939,7 @@ test("MapLayerModal new GeoJSON layer api fail", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   const nameInput = await screen.findByLabelText("Name Input");
@@ -939,8 +984,8 @@ test("MapLayerModal new GeoJSON layer api fail", async () => {
 
   expect(
     await screen.findByText(
-      "Failed to upload the json data. Check logs for more information."
-    )
+      "Failed to upload the json data. Check logs for more information.",
+    ),
   ).toBeInTheDocument();
   expect(addMapLayer).toHaveBeenCalledTimes(0);
 });
@@ -962,7 +1007,7 @@ test("MapLayerModal style", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   const nameInput = await screen.findByLabelText("Name Input");
@@ -974,12 +1019,14 @@ test("MapLayerModal style", async () => {
   const sourceDropdown = screen.getByLabelText("Source Type Input");
 
   selectEvent.openMenu(sourceDropdown);
-  const sourceOption = await screen.findByText("ESRI Image and Map Service");
+  const sourceOption = await screen.findByText("ESRI Feature Service");
   fireEvent.click(sourceOption);
   expect(await screen.findByText("Source Properties")).toBeInTheDocument();
 
   const urlInput = within(sourceTabContent).getByLabelText("value Input 0");
   fireEvent.change(urlInput, { target: { value: "Some Url" } });
+  const layerInput = within(sourceTabContent).getByLabelText("value Input 1");
+  fireEvent.change(layerInput, { target: { value: 0 } });
 
   const styleTab = screen.getByText("Style");
   fireEvent.click(styleTab);
@@ -1026,7 +1073,7 @@ test("MapLayerModal style", async () => {
   fireEvent.click(createLayerButton);
 
   expect(
-    await screen.findByText("Invalid JSON or failed to fetch/parse the file.")
+    await screen.findByText("Invalid JSON or failed to fetch/parse the file."),
   ).toBeInTheDocument();
 
   fireEvent.change(textArea, {
@@ -1042,12 +1089,13 @@ test("MapLayerModal style", async () => {
           name: "New Layer Name",
           source: {
             props: {
+              layer: "0",
               url: "Some Url",
             },
-            type: "ESRI Image and Map Service",
+            type: "ESRI Feature Service",
           },
         },
-        type: "ImageLayer",
+        type: "VectorLayer",
         style: "12345678.json",
       },
     });
@@ -1068,7 +1116,7 @@ test("MapLayerModal style api fail", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   const nameInput = await screen.findByLabelText("Name Input");
@@ -1080,12 +1128,14 @@ test("MapLayerModal style api fail", async () => {
   const sourceDropdown = screen.getByLabelText("Source Type Input");
 
   selectEvent.openMenu(sourceDropdown);
-  const sourceOption = await screen.findByText("ESRI Image and Map Service");
+  const sourceOption = await screen.findByText("ESRI Feature Service");
   fireEvent.click(sourceOption);
   expect(await screen.findByText("Source Properties")).toBeInTheDocument();
 
   const urlInput = within(sourceTabContent).getByLabelText("value Input 0");
   fireEvent.change(urlInput, { target: { value: "Some Url" } });
+  const layerInput = within(sourceTabContent).getByLabelText("value Input 1");
+  fireEvent.change(layerInput, { target: { value: 0 } });
 
   const styleTab = screen.getByText("Style");
   fireEvent.click(styleTab);
@@ -1133,8 +1183,8 @@ test("MapLayerModal style api fail", async () => {
 
   expect(
     await screen.findByText(
-      "Failed to upload the json data. Check logs for more information."
-    )
+      "Failed to upload the json data. Check logs for more information.",
+    ),
   ).toBeInTheDocument();
 
   const closeAlert = screen.getByLabelText("Close alert");
@@ -1142,8 +1192,8 @@ test("MapLayerModal style api fail", async () => {
 
   expect(
     screen.queryByText(
-      "Failed to upload the json data. Check logs for more information."
-    )
+      "Failed to upload the json data. Check logs for more information.",
+    ),
   ).not.toBeInTheDocument();
 
   expect(addMapLayer).toHaveBeenCalledTimes(0);
@@ -1183,7 +1233,7 @@ test("MapLayerModal update ImageArcGISRest layer", async () => {
       handleModalClose={handleModalClose}
       addMapLayer={addMapLayer}
       layerInfo={layerInfo}
-    />
+    />,
   );
 
   expect(await screen.findByRole("dialog")).toBeInTheDocument();

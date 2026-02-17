@@ -7,7 +7,6 @@ from tethysapp.tethysdash.model import (
     copy_named_dashboard,
     get_dashboards,
     add_new_grid_item,
-    delete_grid_item,
     Dashboard,
     GridItem,
     DashboardPermission,
@@ -15,6 +14,7 @@ from tethysapp.tethysdash.model import (
     DashboardPermissionLevel,
     PermissionGroup,
     GroupPermissionLevel,
+    Message,
     parse_db_dashboard,
     clean_up_jsons,
     init_primary_db,
@@ -26,6 +26,8 @@ from tethysapp.tethysdash.model import (
     get_visualization_user_permission,
     get_visualization_permissions,
     update_visualization_permissions,
+    create_message_partitions_for_rolling_window,
+    get_partition_name,
 )
 from unittest.mock import MagicMock
 import base64
@@ -34,6 +36,77 @@ from pathlib import Path
 from types import SimpleNamespace
 from sqlalchemy.exc import ProgrammingError
 from django.contrib.auth.models import AnonymousUser
+from django.test import override_settings
+from uuid import uuid4
+from datetime import datetime, timedelta
+
+
+def test_create_message_partitions_for_rolling_window_executes_sql_for_each_day(mocker):
+    # Mock App.get_persistent_store_database to return a mock engine
+    mock_engine = mocker.Mock()
+    mock_connection = mocker.Mock()
+    mock_engine.connect.return_value = mock_connection
+    mocker.patch(
+        "tethysapp.tethysdash.model.App.get_persistent_store_database",
+        return_value=mock_engine,
+    )
+    # Patch create_partition_for_date to track calls
+    called_days = []
+
+    def fake_create_partition_for_date(connection, ts):
+        called_days.append(ts)
+
+    mocker.patch(
+        "tethysapp.tethysdash.model.create_partition_for_date",
+        side_effect=fake_create_partition_for_date,
+    )
+
+    days_past = 2
+    days_future = 2
+    create_message_partitions_for_rolling_window(
+        days_past=days_past, days_future=days_future
+    )
+
+    # Should be called for each day in the window
+    assert len(called_days) == days_past + days_future + 1
+    # Check that the days are consecutive and centered on today (UTC)
+    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    expected_days = [
+        today + timedelta(days=offset) for offset in range(-days_past, days_future + 1)
+    ]
+    # Compare only dates
+    assert [d.date() for d in called_days] == [d.date() for d in expected_days]
+
+
+def test_create_message_partitions_for_rolling_window_sql_execution(mocker):
+    # Patch App.get_persistent_store_database to return a mock engine
+    mock_engine = mocker.Mock()
+    mock_connection = mocker.Mock()
+    mock_engine.connect.return_value = mock_connection
+    mocker.patch(
+        "tethysapp.tethysdash.model.App.get_persistent_store_database",
+        return_value=mock_engine,
+    )
+
+    # Patch sqlalchemy.text to just return the SQL string
+    mocker.patch(
+        "tethysapp.tethysdash.model.sqlalchemy.text", side_effect=lambda sql: sql
+    )
+
+    # Actually call the real create_partition_for_date to test SQL
+    from tethysapp.tethysdash import model as model_mod
+
+    ts = datetime(2026, 1, 6)
+    model_mod.create_partition_for_date(mock_connection, ts)
+    # Check that execute was called with the expected SQL
+    partition_name = get_partition_name(ts)
+    start = ts.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + model_mod.timedelta(days=1)
+    expected_sql = f"""
+        CREATE TABLE IF NOT EXISTS {partition_name} PARTITION OF messages
+        FOR VALUES FROM ('{start.isoformat()}') TO ('{end.isoformat()}');
+    """
+    mock_connection.execute.assert_called_with(expected_sql)
 
 
 @pytest.fixture
@@ -68,6 +141,7 @@ def test_add_and_delete_dashboard(db_session, mock_app_get_ps_db, test_owner_use
     uuid = "3ddc3d80-2593-468f-825a-425f816c892f"
     name = "added_dashboard"
     grid_items = []
+    tabs = []
     notes = ""
     public = False
     unrestricted_placement = False
@@ -82,6 +156,7 @@ def test_add_and_delete_dashboard(db_session, mock_app_get_ps_db, test_owner_use
         public,
         unrestricted_placement,
         grid_items,
+        tabs,
     )
 
     dashboard = db_session.query(Dashboard).filter(Dashboard.name == name).first()
@@ -94,6 +169,7 @@ def test_add_and_delete_dashboard(db_session, mock_app_get_ps_db, test_owner_use
     assert not dashboard.unrestricted_placement
     dashboard_id = dashboard.id
 
+    assert len(dashboard.tabs) == 1
     assert len(dashboard.grid_items) == 1
 
     # Add a grid item and verify
@@ -106,6 +182,7 @@ def test_add_and_delete_dashboard(db_session, mock_app_get_ps_db, test_owner_use
     grid_item_args_string = json.dumps({"uri": "some_path"})
     grid_item_refreshRate = 0
     grid_item_order = 0
+    uuid = str(uuid4())
     new_grid_item = add_new_grid_item(
         db_session,
         dashboard_id,
@@ -118,6 +195,8 @@ def test_add_and_delete_dashboard(db_session, mock_app_get_ps_db, test_owner_use
         grid_item_args_string,
         grid_item_refreshRate,
         grid_item_order,
+        uuid,
+        dashboard.tabs[0].id,
     )
 
     new_grid_item = (
@@ -125,15 +204,8 @@ def test_add_and_delete_dashboard(db_session, mock_app_get_ps_db, test_owner_use
     )
     assert new_grid_item.x == grid_item_x
     assert new_grid_item.w == grid_item_w
+    assert new_grid_item.uuid == uuid
     new_grid_item_id = new_grid_item.id
-
-    # Delete the new row
-    delete_grid_item(db_session, dashboard_id, grid_item_i)
-
-    new_grid_item = (
-        db_session.query(GridItem).filter(GridItem.id == new_grid_item.id).all()
-    )
-    assert len(new_grid_item) == 0
 
     # Delete the dashboard and Verify dashboard, rows, and columns were deleted
     delete_named_dashboard(test_owner_user, dashboard_id)
@@ -169,6 +241,7 @@ def test_add_and_delete_dashboard_with_grid_items(
     notes = ""
     public = False
     unrestricted_placement = True
+    tabs = []
 
     # Create a new dashboard and Verify dashboard, rows, and columns were created
     add_new_dashboard(
@@ -180,6 +253,7 @@ def test_add_and_delete_dashboard_with_grid_items(
         public,
         unrestricted_placement,
         grid_items,
+        tabs,
     )
 
     dashboard = db_session.query(Dashboard).filter(Dashboard.name == name).first()
@@ -192,19 +266,16 @@ def test_add_and_delete_dashboard_with_grid_items(
     assert dashboard.unrestricted_placement
     dashboard_id = dashboard.id
 
+    assert len(dashboard.tabs) == 1
+    assert dashboard.tabs[0].name == "Main"
     assert len(dashboard.grid_items) == 1
+    # Check grid item order
+    assert dashboard.grid_items[0].order == 0
     assert dashboard.grid_items[0].x == 1
     assert dashboard.grid_items[0].w == 1
     assert dashboard.grid_items[0].source == "Text"
     assert dashboard.grid_items[0].args_string == json.dumps({"text": "Some text"})
-    grid_item_i = dashboard.grid_items[0].i
     grid_item_id = dashboard.grid_items[0].id
-
-    # Delete the new row
-    delete_grid_item(db_session, dashboard_id, grid_item_i)
-
-    new_grid_item = db_session.query(GridItem).filter(GridItem.id == grid_item_id).all()
-    assert len(new_grid_item) == 0
 
     # Delete the dashboard and Verify dashboard, rows, and columns were deleted
     delete_named_dashboard(test_owner_user, dashboard_id)
@@ -213,6 +284,91 @@ def test_add_and_delete_dashboard_with_grid_items(
     assert len(dashboard) == 0
     grid_items = db_session.query(GridItem).filter(GridItem.id == grid_item_id).all()
     assert len(grid_items) == 0
+
+
+@pytest.mark.django_db
+def test_add_dashboard_with_tabs(db_session, mock_app_get_ps_db, test_owner_user):
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    description = "added_dashboard"
+    uuid = "3ddc3d80-2593-468f-825a-425f816c892f"
+    name = "added_dashboard"
+    tabs = [
+        {
+            "name": "A tab",
+            "gridItems": [
+                {
+                    "i": "2",
+                    "x": 1,
+                    "y": 1,
+                    "w": 1,
+                    "h": 1,
+                    "source": "Text",
+                    "uuid": "12345678-1234-5678-1234-567812345678",
+                    "args_string": json.dumps({"text": "Some text"}),
+                    "metadata_string": json.dumps({}),
+                }
+            ],
+        }
+    ]
+    notes = ""
+    public = False
+    unrestricted_placement = True
+    grid_items = []
+
+    # Create a new dashboard and Verify dashboard, rows, and columns were created
+    add_new_dashboard(
+        test_owner_user,
+        uuid,
+        name,
+        description,
+        notes,
+        public,
+        unrestricted_placement,
+        grid_items,
+        tabs,
+    )
+
+    dashboard = db_session.query(Dashboard).filter(Dashboard.name == name).first()
+    assert dashboard.description == description
+    assert dashboard.name == name
+    assert dashboard.notes == ""
+    assert dashboard.uuid == uuid
+    assert dashboard.owner == test_owner_user.username
+    assert not dashboard.public
+    assert dashboard.unrestricted_placement
+
+    assert len(dashboard.tabs) == 1
+    assert dashboard.tabs[0].name == "A tab"
+    assert len(dashboard.grid_items) == 1
+    # Check grid item order
+    assert dashboard.grid_items[0].order == 0
+    assert dashboard.grid_items[0].x == 1
+    assert dashboard.grid_items[0].w == 1
+    assert dashboard.grid_items[0].source == "Text"
+    assert dashboard.grid_items[0].args_string == json.dumps({"text": "Some text"})
+
+    uuid = str(uuid4())
+    new_grid_item = add_new_grid_item(
+        db_session,
+        dashboard.id,
+        "2",
+        1,
+        1,
+        1,
+        1,
+        "Text",
+        {"text": "Some more text"},
+        {"refreshRate": 0},
+        1,
+        uuid,
+        dashboard.tabs[0].id,
+    )
+
+    new_grid_item = (
+        db_session.query(GridItem).filter(GridItem.id == new_grid_item.id).first()
+    )
+    assert new_grid_item.uuid == uuid
+    assert new_grid_item.uuid != "12345678-1234-5678-1234-567812345678"
 
 
 @pytest.mark.django_db
@@ -268,7 +424,7 @@ def test_delete_named_dashboard_not_allowed(
 
 
 @pytest.mark.django_db
-def test_update_named_dashboard(
+def test_update_named_dashboard_grid_items(
     dashboard, db_session, mock_app_get_ps_db, mocker, tmp_path, test_owner_user
 ):
     mock_app_get_ps_db("tethysapp.tethysdash.model.App")
@@ -276,7 +432,7 @@ def test_update_named_dashboard(
     mock_get_app_media.return_value = MagicMock(path=tmp_path)
     new_dashboard_name = "new_name"
 
-    grid_items = [
+    grid_items1 = [
         {
             "i": "1",
             "x": 1,
@@ -286,20 +442,40 @@ def test_update_named_dashboard(
             "source": "Custom Image",
             "args_string": json.dumps({"uri": "some_path"}),
             "metadata_string": json.dumps({"refreshRate": 0}),
+            "uuid": str(uuid4()),
         },
         {
-            "i": "2",
+            "i": "1",
+            "x": 1,
+            "y": 1,
+            "w": 3,
+            "h": 3,
+            "source": "Text",
+            "args_string": json.dumps({"text": "some text"}),
+            "metadata_string": json.dumps({"refreshRate": 0}),
+            "uuid": str(uuid4()),
+        },
+    ]
+
+    grid_items2 = [
+        {
+            "i": "1",
             "x": 1,
             "y": 1,
             "w": 1,
             "h": 1,
             "source": "Custom Image",
-            "args_string": json.dumps({"uri": "some_other_path"}),
+            "args_string": json.dumps({"uri": "some_path"}),
             "metadata_string": json.dumps({"refreshRate": 0}),
+            "uuid": str(uuid4()),
         },
     ]
+    tabs = [
+        {"name": "Grid1", "gridItems": grid_items1},
+        {"name": "Grid2", "gridItems": grid_items2},
+    ]
 
-    # Add rows/cells and update dashboards
+    # Add 2 new tabs with grid items
     updated_notes = "Some new notes"
     update_named_dashboard(
         test_owner_user,
@@ -308,7 +484,7 @@ def test_update_named_dashboard(
             "name": new_dashboard_name,
             "notes": updated_notes,
             "public": True,
-            "gridItems": grid_items,
+            "tabs": tabs,
             "unrestrictedPlacement": True,
             "permissions": [
                 {"permission": "admin", "username": test_owner_user.username},
@@ -319,16 +495,30 @@ def test_update_named_dashboard(
     db_session.refresh(dashboard)
     assert dashboard.name == new_dashboard_name
     assert dashboard.notes == updated_notes
-    assert len(dashboard.grid_items) == 2
-    assert dashboard.grid_items[0].args_string == json.dumps({"uri": "some_path"})
-    assert dashboard.grid_items[0].metadata_string == json.dumps({"refreshRate": 0})
+    assert len(dashboard.tabs) == 2
+    # Check tab order
+    assert dashboard.tabs[0].tab_order == 0
+    assert dashboard.tabs[1].tab_order == 1
+    assert dashboard.tabs[0].name == "Grid1"
+    assert dashboard.tabs[1].name == "Grid2"
+    assert len(dashboard.tabs[0].grid_items) == 2
+    assert dashboard.tabs[0].grid_items[0].order == 0
+    assert dashboard.tabs[0].grid_items[1].order == 1
+    assert dashboard.tabs[0].grid_items[0].args_string == json.dumps(
+        {"uri": "some_path"}
+    )
+    assert dashboard.tabs[0].grid_items[0].metadata_string == json.dumps(
+        {"refreshRate": 0}
+    )
     assert dashboard.public is True
     assert dashboard.unrestricted_placement
     assert len(dashboard.permissions) == 1
     assert dashboard.permissions[0].permission == DashboardPermissionLevel.admin
     assert dashboard.permissions[0].username == dashboard.owner
 
-    grid_item1 = dashboard.grid_items[0]
+    grid_item1 = dashboard.tabs[0].grid_items[0]
+    grid_item2 = dashboard.tabs[0].grid_items[1]
+    grid_item2_id = grid_item2.id
 
     # Add and update rows/cells
     updated_grid_item = [
@@ -342,23 +532,56 @@ def test_update_named_dashboard(
             "source": "Text",
             "args_string": json.dumps({"text": "some text"}),
             "metadata_string": json.dumps({"refreshRate": 30}),
-        }
+            "uuid": grid_item1.uuid,
+        },
+        {
+            "i": "1",
+            "x": 1,
+            "y": 1,
+            "w": 4,
+            "h": 4,
+            "source": "Text",
+            "args_string": json.dumps({"text": "some text"}),
+            "metadata_string": json.dumps({"refreshRate": 0}),
+            "uuid": str(uuid4()),
+        },
     ]
 
+    # delete a tab, delete a grid item, update grid item, add grid item to existing tab
     update_named_dashboard(
         test_owner_user,
         dashboard.id,
-        {"gridItems": updated_grid_item},
+        {
+            "tabs": [
+                {
+                    "id": dashboard.tabs[0].id,
+                    "name": "Grid",
+                    "gridItems": updated_grid_item,
+                }
+            ],
+        },
     )
 
     db_session.refresh(dashboard)
     assert dashboard.name == new_dashboard_name
-    assert len(dashboard.grid_items) == 1
+    assert len(dashboard.tabs) == 1
+    # Check tab order after update
+    assert dashboard.tabs[0].tab_order == 0
+    assert dashboard.tabs[0].name == "Grid"
+    assert len(dashboard.tabs[0].grid_items) == 2
+    # Check grid item order after update
+    assert dashboard.tabs[0].grid_items[0].order == 0
+    assert dashboard.tabs[0].grid_items[1].order == 1
 
-    db_session.refresh(dashboard.grid_items[0])
-    assert dashboard.grid_items[0].w == 2
-    assert dashboard.grid_items[0].h == 2
-    assert dashboard.grid_items[0].metadata_string == json.dumps({"refreshRate": 30})
+    db_session.refresh(dashboard.tabs[0].grid_items[0])
+    assert dashboard.tabs[0].grid_items[0].w == 2
+    assert dashboard.tabs[0].grid_items[0].h == 2
+    assert dashboard.tabs[0].grid_items[0].metadata_string == json.dumps(
+        {"refreshRate": 30}
+    )
+
+    # newly added grid item should have a different id than the deleted one
+    assert dashboard.tabs[0].grid_items[1].id != grid_item2_id
 
 
 @pytest.mark.django_db
@@ -374,7 +597,7 @@ def test_update_named_dashboard_image(
     )
     assert (
         existing_dashboard[0]["image"]
-        == "/static/tethysdash/images/dashboard_thumbnail.png"
+        == "/static/tethysdash/images/default_dashboard.png"
     )
 
     example_image = os.path.join(
@@ -394,8 +617,74 @@ def test_update_named_dashboard_image(
     )
 
     assert (
-        updated_dashboard["image"] == "/media/app_root/app/some_user_dashboard_uuid.png"
+        updated_dashboard["image"]
+        == "/media/tethysdash/app/some_user_dashboard_uuid.png"
     )
+
+
+@pytest.mark.django_db
+def test_update_named_dashboard_live_chat(
+    db_session,
+    live_chat_dashboard,
+    mock_app_get_ps_db,
+    mocker,
+    tmp_path,
+    test_owner_user,
+    create_today_partition,
+):
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    mock_get_app_media = mocker.patch("tethysapp.tethysdash.model.get_app_media")
+    mock_get_app_media.return_value = MagicMock(path=tmp_path)
+
+    tab_id = live_chat_dashboard.tabs[0].id
+    grid_item_id = live_chat_dashboard.tabs[0].grid_items[0].id
+    grid_item_uuid = live_chat_dashboard.tabs[0].grid_items[0].uuid
+
+    message = Message(
+        timestamp=datetime.utcnow(),
+        request_id=grid_item_uuid,
+        session_id="some_session_id",
+        message_id="some_message_id",
+        sender="user",
+        message="Hello, this is a test message.",
+    )
+    db_session.add(message)
+    db_session.commit()
+    db_session.refresh(message)
+
+    message = db_session.query(Message).filter(Message.id == message.id).first()
+    message_id = message.id
+    assert message is not None
+
+    update_named_dashboard(
+        test_owner_user,
+        live_chat_dashboard.id,
+        {
+            "tabs": [
+                {
+                    "name": "Tab 1",
+                    "id": tab_id,
+                    "gridItems": [
+                        {
+                            "id": grid_item_id,
+                            "i": "1",
+                            "x": 1,
+                            "y": 1,
+                            "w": 1,
+                            "h": 1,
+                            "source": "text",
+                            "args_string": json.dumps({}),
+                            "metadata_string": json.dumps({"refreshRate": 0}),
+                            "uuid": grid_item_uuid,
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    old_messages = db_session.query(Message).filter(Message.id == message_id).first()
+    assert old_messages is None
 
 
 @pytest.mark.django_db
@@ -517,7 +806,7 @@ def test_get_dashboards_all(
                 {"permission": "viewer", "group": permission_group["name"]},
             ],
             "unrestrictedPlacement": dashboard.unrestricted_placement,
-            "image": "/static/tethysdash/images/dashboard_thumbnail.png",
+            "image": "/static/tethysdash/images/default_dashboard.png",
             "owner": test_owner_user.username,
         },
         {
@@ -531,7 +820,7 @@ def test_get_dashboards_all(
                 {"permission": "admin", "username": public_dashboard.owner}
             ],
             "unrestrictedPlacement": public_dashboard.unrestricted_placement,
-            "image": "/static/tethysdash/images/dashboard_thumbnail.png",
+            "image": "/static/tethysdash/images/default_dashboard.png",
             "owner": public_dashboard.owner,
         },
     ]
@@ -559,8 +848,8 @@ def test_get_dashboards_specific_dashboard_view(
         "name": dashboard.name,
         "description": dashboard.description,
         "notes": dashboard.notes,
-        "gridItems": [],
-        "image": "/static/tethysdash/images/dashboard_thumbnail.png",
+        "tabs": [],
+        "image": "/static/tethysdash/images/default_dashboard.png",
         "uuid": "some_user_dashboard_uuid",
         "unrestrictedPlacement": False,
         "owner": test_owner_user.username,
@@ -593,7 +882,7 @@ def test_get_dashboards_specific_landing_page_view(
         "id": dashboard.id,
         "name": dashboard.name,
         "description": dashboard.description,
-        "image": "/static/tethysdash/images/dashboard_thumbnail.png",
+        "image": "/static/tethysdash/images/default_dashboard.png",
         "uuid": "some_user_dashboard_uuid",
         "unrestrictedPlacement": False,
         "owner": test_owner_user.username,
@@ -623,24 +912,34 @@ def test_copy_named_dashboard(
     mock_app_get_ps_db("tethysapp.tethysdash.model.App")
     new_dashboard_name = "new_name"
     new_description = "some updated descripion"
-    grid_items = [
+    tabs = [
         {
-            "i": "1",
-            "x": 1,
-            "y": 1,
-            "w": 1,
-            "h": 1,
-            "source": "Custom Image",
-            "args_string": json.dumps({"uri": "some_path"}),
-            "metadata_string": json.dumps({"refreshRate": 0}),
-        },
+            "id": 1,
+            "name": "Tab 1",
+            "gridItems": [
+                {
+                    "i": "1",
+                    "x": 1,
+                    "y": 1,
+                    "w": 1,
+                    "h": 1,
+                    "source": "Custom Image",
+                    "args_string": json.dumps({"uri": "some_path"}),
+                    "metadata_string": json.dumps({"refreshRate": 0}),
+                    "uuid": str(uuid4()),
+                },
+            ],
+        }
     ]
 
     # Add rows/cells and update dashboards
     update_named_dashboard(
         test_owner_user,
         dashboard.id,
-        {"gridItems": grid_items, "description": new_description},
+        {
+            "tabs": tabs,
+            "description": new_description,
+        },
     )
 
     # Add rows/cells and update dashboards
@@ -661,9 +960,23 @@ def test_copy_named_dashboard(
     assert copied_dashboard.owner == test_member_user.username
     assert copied_dashboard.unrestricted_placement == dashboard.unrestricted_placement
 
-    assert len(copied_dashboard.grid_items) == len(dashboard.grid_items) == 1
-    assert dashboard.grid_items[0].dashboard_id == dashboard.id
-    assert copied_dashboard.grid_items[0].dashboard_id == copied_dashboard.id
+    assert len(copied_dashboard.tabs) == len(dashboard.tabs) == 1
+    # Check tab order in copied dashboard
+    assert copied_dashboard.tabs[0].tab_order == dashboard.tabs[0].tab_order == 0
+    assert copied_dashboard.tabs[0].name == dashboard.tabs[0].name
+    assert (
+        len(copied_dashboard.tabs[0].grid_items)
+        == len(dashboard.tabs[0].grid_items)
+        == 1
+    )
+    # Check grid item order in copied dashboard
+    assert (
+        copied_dashboard.tabs[0].grid_items[0].order
+        == dashboard.tabs[0].grid_items[0].order
+        == 0
+    )
+    assert dashboard.tabs[0].grid_items[0].dashboard_id == dashboard.id
+    assert copied_dashboard.tabs[0].grid_items[0].dashboard_id == copied_dashboard.id
     assert len(copied_dashboard.permissions) == 1
     assert copied_dashboard.permissions[0].permission == DashboardPermissionLevel.admin
     assert copied_dashboard.permissions[0].username == test_member_user.username
@@ -692,7 +1005,45 @@ def test_parse_db_dashboard_landing_page_view(
         "uuid": dashboard.uuid,
         "name": dashboard.name,
         "description": dashboard.description,
-        "image": "/static/tethysdash/images/dashboard_thumbnail.png",
+        "image": "/static/tethysdash/images/default_dashboard.png",
+        "unrestrictedPlacement": False,
+        "owner": test_owner_user.username,
+        "permissions": [
+            {"permission": "admin", "username": test_owner_user.username},
+            {"permission": "editor", "username": test_admin_user.username},
+            {"permission": "viewer", "group": permission_group["name"]},
+        ],
+        "publicDashboard": False,
+        "userPermission": "admin",
+    }
+
+
+@pytest.mark.django_db
+@override_settings(PREFIX_URL="test")
+def test_parse_db_dashboard_landing_page_view_with_prefix(
+    dashboard,
+    mock_app_get_ps_db,
+    mocker,
+    tmp_path,
+    db_session,
+    permission_group,
+    test_owner_user,
+    test_admin_user,
+):
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    mock_get_app_media = mocker.patch("tethysapp.tethysdash.model.get_app_media")
+    mock_get_app_media.return_value = MagicMock(path=tmp_path)
+    mocker.patch("os.path.exists", return_value=True)
+
+    existing_dashboard = parse_db_dashboard(
+        db_session, [dashboard], test_owner_user, dashboard_view=False
+    )
+    assert existing_dashboard[0] == {
+        "id": dashboard.id,
+        "uuid": dashboard.uuid,
+        "name": dashboard.name,
+        "description": dashboard.description,
+        "image": "/test/media/tethysdash/app/some_user_dashboard_uuid.png",
         "unrestrictedPlacement": False,
         "owner": test_owner_user.username,
         "permissions": [
@@ -728,9 +1079,9 @@ def test_parse_db_dashboard_dashboard_view(
         "uuid": dashboard.uuid,
         "name": dashboard.name,
         "description": dashboard.description,
-        "image": "/static/tethysdash/images/dashboard_thumbnail.png",
+        "image": "/static/tethysdash/images/default_dashboard.png",
         "notes": dashboard.notes,
-        "gridItems": [],
+        "tabs": [],
         "unrestrictedPlacement": False,
         "owner": test_owner_user.username,
         "permissions": [
@@ -783,68 +1134,126 @@ def test_clean_up_jsons(
                 }
             ),
             "metadata_string": json.dumps({"refreshRate": 0}),
+            "uuid": str(uuid4()),
         },
     ]
 
-    json_folder = os.path.join(workspace_path, "json")
-    user_json_folder = os.path.join(json_folder, test_owner_user.username)
-    os.makedirs(user_json_folder, exist_ok=True)
+    dashboard_folder = os.path.join(workspace_path, dashboard.uuid)
+    os.makedirs(dashboard_folder, exist_ok=True)
 
-    user_used_geojson_file = os.path.join(user_json_folder, "used_geojson.geojson")
-    used_geojson_file = os.path.join(json_folder, "used_geojson.geojson")
-    Path(user_used_geojson_file).touch()
+    used_geojson_file = os.path.join(dashboard_folder, "used_geojson.geojson")
     Path(used_geojson_file).touch()
 
-    user_unused_geojson_file = os.path.join(user_json_folder, "unused_geojson.geojson")
-    unused_geojson_file = os.path.join(json_folder, "unused_geojson.geojson")
-    Path(user_unused_geojson_file).touch()
+    unused_geojson_file = os.path.join(dashboard_folder, "unused_geojson.geojson")
     Path(unused_geojson_file).touch()
 
-    nonuser_geojson_file = os.path.join(json_folder, "nonuser_geojson.geojson")
+    nonuser_geojson_file = os.path.join(dashboard_folder, "nonuser_geojson.geojson")
     Path(nonuser_geojson_file).touch()
 
-    user_used_style_file = os.path.join(user_json_folder, "used_style.json")
-    used_style_file = os.path.join(json_folder, "used_style.json")
-    Path(user_used_style_file).touch()
+    used_style_file = os.path.join(dashboard_folder, "used_style.json")
     Path(used_style_file).touch()
 
-    user_unused_style_file = os.path.join(user_json_folder, "unused_style.json")
-    unused_style_file = os.path.join(json_folder, "unused_style.json")
-    Path(user_unused_style_file).touch()
+    unused_style_file = os.path.join(dashboard_folder, "unused_style.json")
     Path(unused_style_file).touch()
 
-    nonuser_style_file = os.path.join(json_folder, "nonuser_style.json")
+    nonuser_style_file = os.path.join(dashboard_folder, "nonuser_style.json")
     Path(nonuser_style_file).touch()
 
     # Add rows/cells and update dashboards
     update_named_dashboard(
         test_owner_user,
         dashboard.id,
-        {"gridItems": grid_items},
+        {"tabs": [{"name": "Tab 1", "gridItems": grid_items}]},
     )
 
     clean_up_jsons(test_owner_user)
 
-    assert os.path.exists(user_used_geojson_file)
     assert os.path.exists(used_geojson_file)
-    assert not os.path.exists(user_unused_geojson_file)
     assert not os.path.exists(unused_geojson_file)
-    assert os.path.exists(nonuser_geojson_file)
+    assert not os.path.exists(nonuser_geojson_file)
 
-    assert os.path.exists(user_used_style_file)
     assert os.path.exists(used_style_file)
-    assert not os.path.exists(user_unused_style_file)
     assert not os.path.exists(unused_style_file)
-    assert os.path.exists(nonuser_style_file)
+    assert not os.path.exists(nonuser_style_file)
 
 
-def test_init_primary_db_with_current_revision(mocker, mock_alembic):
+@pytest.mark.django_db
+def test_clean_up_jsons_no_existing_dashboard_folder(
+    dashboard, mock_app_get_ps_db, mocker, tmp_path, test_owner_user
+):
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    mock_get_app_media = mocker.patch("tethysapp.tethysdash.model.get_app_media")
+    mock_get_app_media.return_value = MagicMock(path=tmp_path)
+
+    workspace_path = tmp_path
+    mock_get_app_workspace = mocker.patch(
+        "tethysapp.tethysdash.model.get_app_workspace"
+    )
+    mock_get_app_workspace.return_value = MagicMock(path=workspace_path)
+
+    grid_items = [
+        {
+            "i": "1",
+            "x": 1,
+            "y": 1,
+            "w": 1,
+            "h": 1,
+            "source": "Map",
+            "args_string": json.dumps(
+                {
+                    "layers": [
+                        {
+                            "configuration": {
+                                "props": {
+                                    "source": {
+                                        "type": "GeoJSON",
+                                        "geojson": "used_geojson.geojson",
+                                    }
+                                },
+                                "style": "used_style.json",
+                            },
+                        }
+                    ]
+                }
+            ),
+            "metadata_string": json.dumps({"refreshRate": 0}),
+            "uuid": str(uuid4()),
+        },
+    ]
+
+    # Add rows/cells and update dashboards
+    update_named_dashboard(
+        test_owner_user,
+        dashboard.id,
+        {"tabs": [{"name": "Tab 1", "gridItems": grid_items}]},
+    )
+
+    mock_remove = mocker.patch("os.remove")
+    clean_up_jsons(test_owner_user)
+    mock_remove.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_init_primary_db_with_current_revision(
+    mock_app_get_ps_db, mocker, mock_alembic, tmp_path
+):
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
     mocker.patch(
         "tethysapp.tethysdash.model.subprocess.run",
         return_value=SimpleNamespace(stdout="abcd1234 some message"),
     )
 
+    workspace_path = tmp_path
+    mock_get_app_workspace = mocker.patch(
+        "tethysapp.tethysdash.model.get_app_workspace"
+    )
+    mock_get_app_workspace.return_value = MagicMock(path=workspace_path)
+
     mock_alembic.script.walk_revisions.return_value = []
+
+    mocker.patch(
+        "tethysapp.tethysdash.model.create_message_partitions_for_rolling_window"
+    )
 
     init_primary_db(engine=mocker.Mock(), first_time=True)
 
@@ -852,15 +1261,29 @@ def test_init_primary_db_with_current_revision(mocker, mock_alembic):
     mock_alembic.stamp.assert_not_called()
 
 
-def test_init_primary_db_no_current_revision_upgrade_all(mocker, mock_alembic):
+@pytest.mark.django_db
+def test_init_primary_db_no_current_revision_upgrade_all(
+    mock_app_get_ps_db, mocker, mock_alembic, tmp_path
+):
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
     mocker.patch(
         "tethysapp.tethysdash.model.subprocess.run",
         return_value=SimpleNamespace(stdout=""),
     )
 
+    workspace_path = tmp_path
+    mock_get_app_workspace = mocker.patch(
+        "tethysapp.tethysdash.model.get_app_workspace"
+    )
+    mock_get_app_workspace.return_value = MagicMock(path=workspace_path)
+
     rev1 = mocker.Mock(revision="rev1")
     rev2 = mocker.Mock(revision="rev2")
     mock_alembic.script.walk_revisions.return_value = [rev2, rev1]
+
+    mocker.patch(
+        "tethysapp.tethysdash.model.create_message_partitions_for_rolling_window"
+    )
 
     init_primary_db(engine=mocker.Mock(), first_time=True)
 
@@ -870,11 +1293,21 @@ def test_init_primary_db_no_current_revision_upgrade_all(mocker, mock_alembic):
     mock_alembic.stamp.assert_not_called()
 
 
-def test_init_primary_db_skips_existing_table(mocker, mock_alembic):
+@pytest.mark.django_db
+def test_init_primary_db_skips_existing_table(
+    mock_app_get_ps_db, mocker, mock_alembic, tmp_path
+):
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
     mocker.patch(
         "tethysapp.tethysdash.model.subprocess.run",
         return_value=SimpleNamespace(stdout=""),
     )
+
+    workspace_path = tmp_path
+    mock_get_app_workspace = mocker.patch(
+        "tethysapp.tethysdash.model.get_app_workspace"
+    )
+    mock_get_app_workspace.return_value = MagicMock(path=workspace_path)
 
     rev = mock_alembic.revision
     mock_alembic.script.walk_revisions.return_value = [rev]
@@ -882,6 +1315,10 @@ def test_init_primary_db_skips_existing_table(mocker, mock_alembic):
     error = ProgrammingError("select 1", {}, Exception("relation already exists"))
     error.args = ("table already exists",)
     mock_alembic.upgrade.side_effect = error
+
+    mocker.patch(
+        "tethysapp.tethysdash.model.create_message_partitions_for_rolling_window"
+    )
 
     init_primary_db(engine=mocker.Mock(), first_time=True)
 
@@ -1445,6 +1882,26 @@ def test_create_permission_group_but_names_already_exists(
 
 
 @pytest.mark.django_db
+def test_create_permission_group_but_nonexistent_user(
+    mock_app_get_ps_db, permission_group, test_owner_user
+):
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    permission_group["members"] = [
+        {
+            "username": "nonexistent_user",
+            "permission": GroupPermissionLevel.admin.value,
+        },
+    ]
+    permission_group_dict = update_permission_groups(
+        test_owner_user,
+        permission_group,
+    )
+
+    assert permission_group_dict["status"] == "error"
+    assert permission_group_dict["message"] == "Users don't exist: nonexistent_user"
+
+
+@pytest.mark.django_db
 def test_delete_permission_groups(
     mock_app_get_ps_db, db_session, permission_group_table, test_owner_user
 ):
@@ -1647,3 +2104,215 @@ def test_update_visualization_permissions_nonexistent_user_and_groups(
         "The following users do not exist: bad_user; The following groups do not exist: bad_group"  # noqa: E501
         in str(excinfo.value)
     )
+
+
+def test_flatten():
+    # Test with typical list of lists
+    input_data = [[1, 2], [3, 4], [5]]
+    expected = [1, 2, 3, 4, 5]
+    from tethysapp.tethysdash.model import flatten
+
+    assert flatten(input_data) == expected
+
+    # Test with empty list
+    input_data = []
+    expected = []
+    assert flatten(input_data) == expected
+
+    # Test with nested empty lists
+    input_data = [[], [], []]
+    expected = []
+    assert flatten(input_data) == expected
+
+    # Test with mixed empty and non-empty lists
+    input_data = [[1], [], [2, 3], []]
+    expected = [1, 2, 3]
+    assert flatten(input_data) == expected
+
+
+def test_get_user_app_permissions_basic():
+    class MockUser:
+        def get_all_permissions(self):
+            return [
+                "tethys_apps.tethysdash:view_dashboard",
+                "tethys_apps.tethysdash:edit_dashboard",
+                "other_app:admin",
+                "tethys_apps.tethysdash:delete_dashboard",
+            ]
+
+    from tethysapp.tethysdash.model import get_user_app_permissions, App
+
+    App.package = "tethysdash"
+    user = MockUser()
+    perms = get_user_app_permissions(user)
+    assert set(perms) == {"view_dashboard", "edit_dashboard", "delete_dashboard"}
+
+
+def test_get_user_app_permissions_no_permissions():
+    class MockUser:
+        def get_all_permissions(self):
+            return []
+
+    from tethysapp.tethysdash.model import get_user_app_permissions, App
+
+    App.package = "tethysdash"
+    user = MockUser()
+    perms = get_user_app_permissions(user)
+    assert perms == []
+
+
+def test_get_user_app_permissions_unrelated_permissions():
+    class MockUser:
+        def get_all_permissions(self):
+            return ["other_app:view", "another_app:edit"]
+
+    from tethysapp.tethysdash.model import get_user_app_permissions, App
+
+    App.package = "tethysdash"
+    user = MockUser()
+    perms = get_user_app_permissions(user)
+    assert perms == []
+
+
+def test_get_user_app_permissions_mixed_permissions():
+    class MockUser:
+        def get_all_permissions(self):
+            return [
+                "tethys_apps.tethysdash:view_dashboard",
+                "tethys_apps.tethysdash:edit_dashboard",
+                "tethys_apps.other:view",
+                "tethys_apps.tethysdash:custom",
+            ]
+
+    from tethysapp.tethysdash.model import get_user_app_permissions, App
+
+    App.package = "tethysdash"
+    user = MockUser()
+    perms = get_user_app_permissions(user)
+    assert set(perms) == {"view_dashboard", "edit_dashboard", "custom"}
+
+
+def create_dummy_json_files(root, files):
+    os.makedirs(root, exist_ok=True)
+    for fname in files:
+        with open(os.path.join(root, fname), "w") as f:
+            json.dump({"dummy": True}, f)
+
+
+class MockDashboard:
+    def __init__(self, id, grid_items):
+        self.id = id
+        self.uuid = str(uuid4())
+        self.grid_items = grid_items
+
+
+class MockGridItem:
+    def __init__(self, id, source, args_string):
+        self.id = id
+        self.source = source
+        if args_string:
+            self.args_string = args_string
+
+
+def test_init_primary_db_moves_json_and_geojson_files(
+    mock_app_get_ps_db, tmp_path, mocker
+):
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    mocker.patch(
+        "tethysapp.tethysdash.model.subprocess.run",
+        return_value=SimpleNamespace(stdout=""),
+    )
+
+    mocker.patch(
+        "tethysapp.tethysdash.model.create_message_partitions_for_rolling_window"
+    )
+    temp_workspace = tmp_path
+    json_dir = os.path.join(temp_workspace, "json")
+    admin_user_dir = os.path.join(json_dir, "admin")
+    geojson_dir = os.path.join(temp_workspace, "geojson")
+    os.makedirs(json_dir)
+    os.makedirs(geojson_dir)
+    os.makedirs(admin_user_dir)
+    # Create dummy files
+    create_dummy_json_files(json_dir, ["a.json"])
+    create_dummy_json_files(geojson_dir, ["c.json"])
+    create_dummy_json_files(admin_user_dir, ["b.json"])
+
+    mock_get_app_workspace = mocker.patch(
+        "tethysapp.tethysdash.model.get_app_workspace"
+    )
+    mock_get_app_workspace.return_value = MagicMock(path=temp_workspace)
+
+    mock_query = mocker.patch("sqlalchemy.orm.Session.query")
+
+    dashboard_1 = MockDashboard(
+        id=1,
+        grid_items=[
+            MockGridItem(
+                id=1,
+                source="Map",
+                args_string=json.dumps(
+                    {
+                        "layers": [
+                            {
+                                "configuration": {
+                                    "props": {"source": {"geojson": "c.json"}},
+                                    "style": "b.json",
+                                }
+                            },
+                            {
+                                "configuration": {
+                                    "props": {"source": {"geojson": "some/url/d.json"}},
+                                    "style": "some/url/a.json",
+                                }
+                            },
+                        ]
+                    }
+                ),
+            ),
+            MockGridItem(id=2, source="Map", args_string=None),
+            MockGridItem(
+                id=3,
+                source="Map",
+                args_string=json.dumps(
+                    {
+                        "layers": [
+                            {},
+                        ]
+                    }
+                ),
+            ),
+        ],
+    )
+    mock_query.return_value.all.return_value = [dashboard_1]
+
+    init_primary_db(engine=mocker.Mock(), first_time=True)
+
+    # Check that files have been deleted from original locations
+    assert not os.path.exists(os.path.join(json_dir, "a.json"))
+    assert not os.path.exists(os.path.join(admin_user_dir, "b.json"))
+    assert not os.path.exists(os.path.join(geojson_dir, "c.json"))
+
+    assert os.path.exists(os.path.join(temp_workspace, dashboard_1.uuid, "c.json"))
+    assert os.path.exists(os.path.join(temp_workspace, dashboard_1.uuid, "b.json"))
+
+
+def test_init_primary_db_moves_no_json_and_geojson_folders(
+    mock_app_get_ps_db, tmp_path, mocker
+):
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    mocker.patch(
+        "tethysapp.tethysdash.model.subprocess.run",
+        return_value=SimpleNamespace(stdout=""),
+    )
+
+    mocker.patch(
+        "tethysapp.tethysdash.model.create_message_partitions_for_rolling_window"
+    )
+
+    mock_get_app_workspace = mocker.patch(
+        "tethysapp.tethysdash.model.get_app_workspace"
+    )
+    mock_get_app_workspace.return_value = MagicMock(path=tmp_path)
+
+    init_primary_db(engine=mocker.Mock(), first_time=True)

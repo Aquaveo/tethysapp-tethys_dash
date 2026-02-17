@@ -12,15 +12,22 @@ import {
   getVisualization,
   updateObjectWithVariableInputs,
   findSelectOptionByValue,
+  getDependentVariableInputs,
 } from "components/visualizations/utilities";
 import {
   AppContext,
   EditingContext,
   VariableInputsContext,
+  GridItemContext,
 } from "components/contexts/Contexts";
 import { valuesEqual } from "components/modals/utilities";
 import styled from "styled-components";
 import Spinner from "react-bootstrap/Spinner";
+import { addVerticalLine } from "components/visualizations/BasePlot";
+import { WebsocketContext } from "components/contexts/WebSocketContext";
+import ProgressBar from "react-bootstrap/ProgressBar";
+import LiveChat from "components/visualizations/LiveChat";
+import { isRelativeInput } from "components/inputs/dateUtils";
 
 const StyledSpinner = styled(Spinner)`
   margin: auto;
@@ -41,10 +48,51 @@ const StyledH2 = styled.h2`
   align-items: center;
   height: 100%;
   text-align: center;
+  word-wrap: break-word;
+  word-break: break-word;
+  white-space: pre-wrap;
+  overflow: auto;
+  padding: 1rem;
+`;
+
+const CenteredContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100%;
+  width: 100%;
 `;
 
 export const Visualization = memo(
-  ({ vizRef, vizType, vizData, dataviewerViz }) => {
+  ({ vizRef, vizType, vizData, progressMessage, dataviewerViz }) => {
+    if (progressMessage && vizType === "loader") {
+      const msgObj = JSON.parse(progressMessage);
+      const { message, step, totalSteps } = msgObj;
+      const percent =
+        step && totalSteps ? Math.round((step / totalSteps) * 100) : null;
+
+      return (
+        <CenteredContainer>
+          <StyledH2>{message}</StyledH2>
+          {percent !== null && (
+            <ProgressBar
+              now={percent}
+              label={`${step} / ${totalSteps} (${percent}%)`}
+              style={{ margin: "0 auto", width: "60%" }}
+            />
+          )}
+          <SpinnerContainer>
+            <StyledSpinner
+              data-testid="Progress Message Loading..."
+              animation="border"
+              variant="info"
+            />
+          </SpinnerContainer>
+        </CenteredContainer>
+      );
+    }
+
     switch (vizType) {
       case "unknown":
         return <div data-testid="Source_Unknown" />;
@@ -64,6 +112,7 @@ export const Visualization = memo(
           <VariableInput
             variable_name={vizData.variable_name}
             initial_value={vizData.initial_value}
+            show_label={vizData.show_label}
             variable_options_source={vizData.variable_options_source}
             metadata={vizData.metadata}
             onChange={vizData.onChange ?? (() => {})}
@@ -109,6 +158,13 @@ export const Visualization = memo(
             visualizationRef={vizRef}
           />
         );
+      case "liveChat":
+        return (
+          <LiveChat
+            requestId={vizData.requestId}
+            chatHistory={vizData.chatHistory}
+          />
+        );
       case "custom":
         return (
           <ModuleLoader
@@ -142,30 +198,92 @@ export const Visualization = memo(
           </SpinnerContainer>
         );
     }
-  }
+  },
 );
 
-const BaseVisualization = ({ source, argsString, metadataString }) => {
+// Helper function to compare only the keys that exist in filteredOriginalArgs
+export const compareFilteredArgs = (
+  currentArgs,
+  updatedArgs,
+  keysToCompare,
+) => {
+  const filteredCurrent = {};
+  const filteredUpdated = {};
+
+  for (const key of Object.keys(keysToCompare)) {
+    if (currentArgs && currentArgs[key] !== undefined) {
+      filteredCurrent[key] = currentArgs[key];
+    }
+    if (updatedArgs && updatedArgs[key] !== undefined) {
+      filteredUpdated[key] = updatedArgs[key];
+    }
+  }
+
+  return valuesEqual(filteredCurrent, filteredUpdated);
+};
+
+// Filter function to exclude date/date-hour types and relative dates
+const filterNonRelativeDateArgs = (
+  args,
+  variableInputs,
+  variableInputDateFormats,
+) => {
+  const filtered = {};
+  for (const [key, value] of Object.entries(args)) {
+    const dateFormat = variableInputDateFormats?.[key];
+    const dependentVariableInputs = getDependentVariableInputs(value);
+
+    let validFilter = true;
+    for (const input of dependentVariableInputs) {
+      // Skip if the argument type is date or date-hour and the value is a relative date
+      const variableInput = variableInputs?.[input];
+      if (dateFormat || isRelativeInput(variableInput)) {
+        validFilter = false;
+      }
+    }
+
+    if (validFilter) {
+      filtered[key] = value;
+    }
+  }
+  return filtered;
+};
+
+const BaseVisualization = () => {
+  const {
+    gridItemSource,
+    gridItemArgsString,
+    gridItemMetadataString,
+    gridItemUUID,
+    shouldLoad,
+  } = useContext(GridItemContext);
   const [vizType, setVizType] = useState("loader");
   const [vizData, setVizData] = useState({});
   const { visualizations } = useContext(AppContext);
-  const { variableInputValues } = useContext(VariableInputsContext);
+  const { variableInputValues, variableInputDateFormats } = useContext(
+    VariableInputsContext,
+  );
   const gridItemArgsWithVariableInputs = useRef(0);
+  const gridItemMetadataWithVariableInputs = useRef(0);
   const customMessages = useRef({});
-  const gridItemSource = useRef(0);
   const [refreshCount, setRefreshCount] = useState(0);
   const { isEditing } = useContext(EditingContext);
   const dashboardVizRef = useRef();
+  const { getMessageForRequest } = useContext(WebsocketContext);
+  const requestId = useRef(gridItemUUID);
+  // Ref to track if we've already loaded for this source with empty args
+  const loadedEmptyArgsForSource = useRef({});
 
   useEffect(() => {
-    const args = JSON.parse(argsString);
-    if (source === "") {
+    const args = JSON.parse(gridItemArgsString);
+    if (gridItemSource === "") {
       setVizType("unknown");
-    } else if (source === "Variable Input") {
+    } else if (gridItemSource === "Variable Input") {
       setVizType("variableInput");
       setVizData({
         variable_name: args.variable_name,
         initial_value: args.initial_value,
+        show_label: args.show_label,
         variable_options_source: args.variable_options_source,
         metadata: args["variable_options_source.metadata"],
       });
@@ -173,22 +291,22 @@ const BaseVisualization = ({ source, argsString, metadataString }) => {
       setVariableDependentVisualizations({});
     }
     // eslint-disable-next-line
-  }, [source, argsString, metadataString]);
+  }, [gridItemSource, gridItemArgsString, gridItemMetadataString]);
 
   useEffect(() => {
-    if (!["", "Variable Input"].includes(source)) {
+    if (!["", "Variable Input"].includes(gridItemSource)) {
       setVariableDependentVisualizations({});
     }
     // eslint-disable-next-line
-  }, [variableInputValues]);
+  }, [variableInputValues, shouldLoad]);
 
   useEffect(() => {
-    const gridMetadata = JSON.parse(metadataString);
+    const gridMetadata = JSON.parse(gridItemMetadataString);
     const refreshRate = gridMetadata.refreshRate;
     if (
       refreshRate &&
       refreshRate > 0 &&
-      !["", "Text", "Variable Input"].includes(source)
+      !["", "Text", "Variable Input"].includes(gridItemSource)
     ) {
       const interval = setInterval(
         () => {
@@ -197,41 +315,67 @@ const BaseVisualization = ({ source, argsString, metadataString }) => {
             setVariableDependentVisualizations({ refresh: true });
           }
         },
-        parseInt(refreshRate) * 1000 * 60
+        parseInt(refreshRate) * 1000 * 60,
       );
       return () => clearInterval(interval);
     }
     // eslint-disable-next-line
-  }, [metadataString, isEditing]);
+  }, [gridItemMetadataString, isEditing]);
 
   async function setVariableDependentVisualizations({ refresh }) {
-    const args = JSON.parse(argsString);
-    const gridMetadata = JSON.parse(metadataString);
-    const sourceType = findSelectOptionByValue(
+    const originalArgs = JSON.parse(gridItemArgsString);
+    const args = JSON.parse(gridItemArgsString);
+    const gridMetadata = JSON.parse(gridItemMetadataString);
+    const visualization = findSelectOptionByValue(
       visualizations,
-      source,
-      "source"
-    )?.type;
+      gridItemSource,
+      "source",
+    );
+    const sourceType = visualization?.type;
 
-    const itemData = { source: source, args: args };
+    const itemData = { source: gridItemSource, args: args };
     const updatedGridItemArgs = updateObjectWithVariableInputs(
       args,
-      variableInputValues
+      variableInputValues,
+      variableInputDateFormats,
+    );
+
+    const updatedGridItemMetadata = updateObjectWithVariableInputs(
+      gridMetadata,
+      variableInputValues,
+      variableInputDateFormats,
     );
     const customMessaging = gridMetadata.customMessaging;
 
+    const filteredOriginalArgs = filterNonRelativeDateArgs(
+      originalArgs,
+      variableInputValues,
+      variableInputDateFormats,
+    );
+
+    // Only allow the empty args load to run once per source unless refresh is true
+    const isEmptyArgs = gridItemSource && Object.keys(args).length === 0;
+    const alreadyLoadedEmptyArgs =
+      loadedEmptyArgsForSource.current[gridItemSource];
+
     if (
-      refresh ||
-      (source && argsString === "{}") ||
-      !valuesEqual(
-        gridItemArgsWithVariableInputs.current,
-        updatedGridItemArgs
-      ) ||
-      !valuesEqual(customMessages.current, customMessaging)
+      (refresh ||
+        (isEmptyArgs && !alreadyLoadedEmptyArgs) ||
+        (!isEmptyArgs &&
+          (!compareFilteredArgs(
+            gridItemArgsWithVariableInputs.current,
+            updatedGridItemArgs,
+            filteredOriginalArgs,
+          ) ||
+            !valuesEqual(customMessages.current, customMessaging)))) &&
+      shouldLoad
     ) {
+      if (isEmptyArgs) {
+        loadedEmptyArgsForSource.current[gridItemSource] = true;
+      }
       itemData.args = updatedGridItemArgs;
+      itemData.requestId = requestId.current;
       gridItemArgsWithVariableInputs.current = updatedGridItemArgs;
-      gridItemSource.current = source;
       customMessages.current = customMessaging;
 
       await getVisualization({
@@ -239,16 +383,52 @@ const BaseVisualization = ({ source, argsString, metadataString }) => {
         setVizData,
         sourceType,
         itemData,
-        argsString,
-        metadataString,
+        argsString: gridItemArgsString,
+        metadataString: gridItemMetadataString,
         variableInputValues,
         dashboardView: true,
         vizLoadingIcon: findSelectOptionByValue(
           visualizations,
-          source,
-          "source"
+          gridItemSource,
+          "source",
         )?.loading_icon,
+        variableInputDateFormats,
       });
+    }
+
+    if (
+      !valuesEqual(
+        gridItemMetadataWithVariableInputs.current,
+        updatedGridItemMetadata,
+      )
+    ) {
+      gridItemMetadataWithVariableInputs.current = updatedGridItemMetadata;
+
+      const sourceType = findSelectOptionByValue(
+        visualizations,
+        gridItemSource,
+        "source",
+      )?.type;
+
+      if (
+        sourceType === "plotly" &&
+        updatedGridItemMetadata?.plotlyVerticalLine
+      ) {
+        let verticalLineValue =
+          updatedGridItemMetadata?.plotlyVerticalLine?.value;
+        const verticalLineColor =
+          updatedGridItemMetadata?.plotlyVerticalLine?.color;
+        const verticalLineWidth =
+          updatedGridItemMetadata?.plotlyVerticalLine?.width;
+        const verticalLineDash =
+          updatedGridItemMetadata?.plotlyVerticalLine?.dash;
+
+        addVerticalLine(dashboardVizRef, verticalLineValue, {
+          color: verticalLineColor,
+          width: verticalLineWidth,
+          dash: verticalLineDash,
+        });
+      }
     }
   }
 
@@ -257,14 +437,9 @@ const BaseVisualization = ({ source, argsString, metadataString }) => {
       vizRef={dashboardVizRef}
       vizType={vizType}
       vizData={vizData}
+      progressMessage={getMessageForRequest(requestId.current)}
     />
   );
-};
-
-BaseVisualization.propTypes = {
-  source: PropTypes.string,
-  argsString: PropTypes.string,
-  metadataString: PropTypes.string,
 };
 
 Visualization.propTypes = {
@@ -275,7 +450,20 @@ Visualization.propTypes = {
   vizType: PropTypes.string, // determines the type of visualization to be displayed
   vizData: PropTypes.object, // contains information for the various visualization args
   dataviewerViz: PropTypes.bool, // determines if the visualization is in the dataviewer
+  progressMessage: PropTypes.string, // stringified object that contains message, step, and totalSteps
 };
 
-export default memo(BaseVisualization);
+// Custom comparison function for BaseVisualization
+const areBasePropsEqual = (prevProps, nextProps) => {
+  // Only rerender if the actual props that affect visualization change
+  return (
+    valuesEqual(prevProps.source, nextProps.source) &&
+    valuesEqual(prevProps.argsString, nextProps.argsString) &&
+    valuesEqual(prevProps.metadataString, nextProps.metadataString) &&
+    valuesEqual(prevProps.shouldLoad, nextProps.shouldLoad) &&
+    valuesEqual(prevProps.uuid, nextProps.uuid)
+  );
+};
+
+export default memo(BaseVisualization, areBasePropsEqual);
 Visualization.displayName = "Visualization";

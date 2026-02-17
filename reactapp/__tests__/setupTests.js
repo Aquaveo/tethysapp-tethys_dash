@@ -9,13 +9,19 @@ import { server } from "./utilities/server.js";
 // Mock `window.location` with Jest spies and extend expect
 import "jest-location-mock";
 import { createMocks } from "react-idle-timer";
+import { MockWebSocket } from "./utilities/mockWebSocket.js";
 
 // Make .env files accessible to tests (path relative to project root)
 const originalError = console.error.bind(console.error);
 const originalEnv = process.env;
 
+global.WebSocket = MockWebSocket;
+global.createPatternMock = jest.fn(() => ({}));
+global.__wsInstances = [];
+
 beforeEach(() => {
   jest.clearAllMocks();
+  global.__wsInstances = [];
 });
 
 // Setup mocked Tethys API
@@ -26,7 +32,7 @@ beforeAll(() => {
       !args
         .toString()
         .includes(
-          "Warning: `ReactDOMTestUtils.act` is deprecated in favor of `React.act`. Import `act` from `react` instead of `react-dom/test-utils`."
+          "Warning: `ReactDOMTestUtils.act` is deprecated in favor of `React.act`. Import `act` from `react` instead of `react-dom/test-utils`.",
         ) &&
       !args.toString().includes("act(...)")
     ) {
@@ -44,6 +50,7 @@ afterEach(() => {
   process.env = originalEnv;
   jest.clearAllMocks();
   jest.restoreAllMocks();
+  global.__wsInstances = [];
 });
 
 afterAll(() => {
@@ -73,5 +80,6 @@ HTMLCanvasElement.prototype.getContext = function () {
     fill: () => {},
     arc: () => {},
     clip: () => {},
+    createPattern: global.createPatternMock,
   };
 };

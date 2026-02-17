@@ -9,8 +9,10 @@ import {
   DataViewerModeContext,
   VariableInputsContext,
   DisabledEditingMovementContext,
+  TabContext,
 } from "components/contexts/Contexts";
 import { useAppTourContext } from "components/contexts/AppTourContext";
+import { ModalPriorityProvider } from "components/contexts/ModalPriorityContext";
 import { server } from "__tests__/utilities/server";
 import { rest } from "msw";
 
@@ -44,15 +46,15 @@ const TestingComponent = ({ children, options = {} }) => {
 
 const createLoadedComponent = ({ children, options = {} }) => {
   const dashboards = JSON.parse(
-    JSON.stringify(options.dashboards ?? mockedDashboards)
+    JSON.stringify(options.dashboards ?? mockedDashboards),
   );
   const initialDashboard = JSON.parse(
-    JSON.stringify(options.initialDashboard ?? dashboards.dashboards[0])
+    JSON.stringify(options.initialDashboard ?? dashboards.dashboards[0]),
   );
   const permissionGroups = JSON.parse(
     JSON.stringify(
-      options.permissionGroups ?? mockedDashboards.permission_groups
-    )
+      options.permissionGroups ?? mockedDashboards.permission_groups,
+    ),
   );
   dashboards.permission_groups = permissionGroups;
 
@@ -64,9 +66,9 @@ const createLoadedComponent = ({ children, options = {} }) => {
           return res(
             ctx.status(401),
             ctx.json({ error: "Internal Server Error" }),
-            ctx.set("Content-Type", "application/json")
+            ctx.set("Content-Type", "application/json"),
           );
-        })
+        }),
       );
     } else {
       server.use(
@@ -74,9 +76,9 @@ const createLoadedComponent = ({ children, options = {} }) => {
           return res(
             ctx.status(200),
             ctx.json(options.user),
-            ctx.set("Content-Type", "application/json")
+            ctx.set("Content-Type", "application/json"),
           );
-        })
+        }),
       );
     }
   }
@@ -93,10 +95,10 @@ const createLoadedComponent = ({ children, options = {} }) => {
           return res(
             ctx.status(200),
             ctx.json(dashboards),
-            ctx.set("Content-Type", "application/json")
+            ctx.set("Content-Type", "application/json"),
           );
-        }
-      )
+        },
+      ),
     );
 
     server.use(
@@ -106,10 +108,10 @@ const createLoadedComponent = ({ children, options = {} }) => {
           return res(
             ctx.status(200),
             ctx.json({ success: true, dashboard: initialDashboard }),
-            ctx.set("Content-Type", "application/json")
+            ctx.set("Content-Type", "application/json"),
           );
-        }
-      )
+        },
+      ),
     );
   }
 
@@ -123,19 +125,34 @@ const createLoadedComponent = ({ children, options = {} }) => {
             ctx.json({
               visualizations: options.visualizations,
             }),
-            ctx.set("Content-Type", "application/json")
+            ctx.set("Content-Type", "application/json"),
           );
-        }
-      )
+        },
+      ),
     );
   }
 
   return (
-    <Loader>
-      <DashboardLoader {...initialDashboard}>
-        <TestingComponent options={options}>{children}</TestingComponent>
-      </DashboardLoader>
-    </Loader>
+    <ModalPriorityProvider>
+      <Loader>
+        <DashboardLoader {...initialDashboard}>
+          <TestingComponent options={options}>{children}</TestingComponent>
+        </DashboardLoader>
+      </Loader>
+    </ModalPriorityProvider>
+  );
+};
+
+export const TabsPComponent = () => {
+  const { tabs, activeTabId } = useContext(TabContext);
+
+  return (
+    <p data-testid="tabs-context">
+      {JSON.stringify({
+        tabs,
+        activeTabId,
+      })}
+    </p>
   );
 };
 
@@ -145,7 +162,6 @@ export const ContextLayoutPComponent = () => {
     uuid,
     name,
     notes,
-    gridItems,
     editable,
     publicDashboard,
     userPermission,
@@ -168,7 +184,6 @@ export const ContextLayoutPComponent = () => {
         userPermission,
         unrestrictedPlacement,
         notes,
-        gridItems,
         editable,
       })}
     </p>
@@ -183,7 +198,7 @@ export const EditingPComponent = () => {
 
 export const DisabledMovementPComponent = () => {
   const { disabledEditingMovement } = useContext(
-    DisabledEditingMovementContext
+    DisabledEditingMovementContext,
   );
 
   return (

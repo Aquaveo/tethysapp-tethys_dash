@@ -1,11 +1,14 @@
-import { useState, useEffect, memo } from "react";
+import { useState, useEffect, useContext, memo } from "react";
 import DataRadioSelect from "components/inputs/DataRadioSelect";
 import PropTypes from "prop-types";
 import styled from "styled-components";
 import NormalInput from "components/inputs/NormalInput";
 import DataSelect from "components/inputs/DataSelect";
 import DatePicker from "components/inputs/DatePicker";
-import { timeDeltas } from "components/inputs/Slider";
+import DateFormat from "components/inputs/DateFormat";
+import { timeDeltas, calculateSliderValues } from "components/inputs/Slider";
+import { VariableInputsContext } from "components/contexts/Contexts";
+import { updateObjectWithVariableInputs } from "components/visualizations/utilities";
 
 const FlexDiv = styled.div`
   display: flex;
@@ -19,26 +22,67 @@ const TimeDeltaDiv = styled.div`
   position: relative;
 `;
 
-const SliderMetadata = ({ onChange, values, visualizationRef }) => {
+const SpeedOptionWrapper = styled.div`
+  margin-bottom: 1rem;
+`;
+
+const SpeedOptionContainer = styled.div`
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+`;
+
+const defaultSpeedOptions = [
+  { label: "Extra Slow", value: 2000 },
+  { label: "Slow", value: 1000 },
+  { label: "Medium", value: 500 },
+  { label: "Fast", value: 250 },
+  { label: "Extra Fast", value: 100 },
+];
+
+const SliderMetadata = ({ onChange, values }) => {
   const [min, setMin] = useState(values?.min ?? null);
   const [max, setMax] = useState(values?.max ?? null);
   const [step, setStep] = useState(values?.step ?? null);
   const [outputFormat, setOutputFormat] = useState(values?.outputFormat ?? "");
   const [rangeMode, setRangeMode] = useState(values?.rangeMode ?? false);
   const [initialValue, setInitialValue] = useState(
-    values?.initialValue ?? null
+    values?.initialValue ?? null,
   );
   const [initialRange, setInitialRange] = useState(
-    values?.initialRange ?? [null, null]
+    values?.initialRange ?? [null, null],
   );
   const [dataType, setDataType] = useState(
-    values?.dataType ? { value: values.dataType, label: values.dataType } : null
+    values?.dataType
+      ? { value: values.dataType, label: values.dataType }
+      : null,
   );
   const [dateTimeDelta, setDateTimeDelta] = useState(
     values?.dateTimeDelta
       ? { value: values.dateTimeDelta, label: values.dateTimeDelta }
-      : { value: "Days", label: "Days" }
+      : { value: "Days", label: "Days" },
   );
+  const [speedOptions, setSpeedOptions] = useState(
+    values?.speedOptions || defaultSpeedOptions.map((opt) => opt.value),
+  );
+  const { variableInputValues } = useContext(VariableInputsContext);
+
+  const possibleValues =
+    min != null && max != null && step != null && dataType
+      ? calculateSliderValues(
+          updateObjectWithVariableInputs(
+            {
+              min,
+              max,
+              step,
+              unit: dateTimeDelta?.value,
+              dataType: dataType?.value,
+            },
+            variableInputValues,
+          ),
+        )
+      : [];
 
   useEffect(() => {
     if (
@@ -55,6 +99,7 @@ const SliderMetadata = ({ onChange, values, visualizationRef }) => {
         dataType: dataType.value,
         outputFormat,
         rangeMode,
+        speedOptions,
       };
       if (rangeMode) {
         if (initialRange[0] == null || initialRange[1] == null) {
@@ -85,7 +130,22 @@ const SliderMetadata = ({ onChange, values, visualizationRef }) => {
     outputFormat,
     dataType?.value,
     dateTimeDelta.value,
+    speedOptions,
   ]);
+
+  const handleSpeedOptionsChange = (e) => {
+    const { value, checked } = e.target;
+    setSpeedOptions((prev) => {
+      let updated;
+      if (checked) {
+        updated = [...prev, Number(value)];
+      } else {
+        updated = prev.filter((v) => v !== Number(value));
+      }
+      // Sort from most to least
+      return updated.sort((a, b) => b - a);
+    });
+  };
 
   const onDataTypeChange = (selected) => {
     setDataType(selected);
@@ -126,6 +186,27 @@ const SliderMetadata = ({ onChange, values, visualizationRef }) => {
 
   return (
     <>
+      <SpeedOptionWrapper>
+        <label>
+          <b>Speed Options</b>:
+        </label>
+        <SpeedOptionContainer>
+          {defaultSpeedOptions.map((opt) => (
+            <label
+              key={opt.value}
+              style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}
+            >
+              <input
+                type="checkbox"
+                value={opt.value}
+                checked={speedOptions.includes(opt.value)}
+                onChange={handleSpeedOptionsChange}
+              />
+              {opt.label} ({opt.value / 1000}s)
+            </label>
+          ))}
+        </SpeedOptionContainer>
+      </SpeedOptionWrapper>
       <DataRadioSelect
         label="Slider Mode"
         radioOptions={[
@@ -153,56 +234,74 @@ const SliderMetadata = ({ onChange, values, visualizationRef }) => {
             value={min}
             type="number"
             onChange={onMinChange}
-            divProps={{ style: { "margin-top": "1rem" } }}
+            divProps={{ style: { marginTop: "1rem" } }}
           />
           <NormalInput
             label="Maximum"
             value={max}
             type="number"
             onChange={onMaxChange}
-            divProps={{ style: { "margin-top": "1rem" } }}
+            divProps={{ style: { marginTop: "1rem" } }}
           />
-          {rangeMode ? (
-            <>
-              <NormalInput
-                label="Range Start"
-                value={initialRange[0]}
-                type="number"
-                onChange={(e) =>
-                  setInitialRange([Number(e.target.value), initialRange[1]])
-                }
-              />
-              <NormalInput
-                label="Range End"
-                value={initialRange[1]}
-                type="number"
-                onChange={(e) =>
-                  setInitialRange([initialRange[0], Number(e.target.value)])
-                }
-              />
-            </>
-          ) : (
-            <NormalInput
-              label="Initial Value"
-              value={initialValue}
-              type="number"
-              onChange={(e) => setInitialValue(Number(e.target.value))}
-            />
-          )}
           <NormalInput
             label="Step"
             value={step}
             type="number"
             onChange={(e) => setStep(Number(e.target.value))}
-            divProps={{ style: { "margin-top": "1rem" } }}
+            divProps={{ style: { marginTop: "1rem" } }}
           />
+          {rangeMode ? (
+            <>
+              <DataSelect
+                label="Range Start"
+                aria-label="Range Start"
+                selectedOption={
+                  initialRange[0] != null
+                    ? { value: initialRange[0], label: initialRange[0] }
+                    : null
+                }
+                onChange={(selected) =>
+                  setInitialRange([selected.value, initialRange[1]])
+                }
+                options={possibleValues.map((v) => ({ value: v, label: v }))}
+                divProps={{ style: { marginTop: "1rem" } }}
+              />
+              <DataSelect
+                label="Range End"
+                aria-label="Range End"
+                selectedOption={
+                  initialRange[1] != null
+                    ? { value: initialRange[1], label: initialRange[1] }
+                    : null
+                }
+                onChange={(selected) =>
+                  setInitialRange([initialRange[0], selected.value])
+                }
+                options={possibleValues.map((v) => ({ value: v, label: v }))}
+                divProps={{ style: { marginTop: "1rem" } }}
+              />
+            </>
+          ) : (
+            <DataSelect
+              label="Initial Value"
+              aria-label="Initial Value"
+              selectedOption={
+                initialValue != null
+                  ? { value: initialValue, label: initialValue }
+                  : null
+              }
+              onChange={(selected) => setInitialValue(selected.value)}
+              options={possibleValues.map((v) => ({ value: v, label: v }))}
+              divProps={{ style: { marginTop: "1rem" } }}
+            />
+          )}
           <NormalInput
             label="Output Format"
             value={outputFormat}
             type="text"
             onChange={(e) => setOutputFormat(e.target.value)}
             placeholder="e.g., {{n}}, {{n:3}}, {{n}}Forecast"
-            divProps={{ style: { "margin-top": "1rem" } }}
+            divProps={{ style: { marginTop: "1rem" } }}
           />
         </>
       )}
@@ -211,43 +310,15 @@ const SliderMetadata = ({ onChange, values, visualizationRef }) => {
           <DatePicker
             label="Minimum"
             value={min}
-            type="date-hour"
             onChange={onMinChange}
-            divProps={{ style: { "margin-top": "1rem" } }}
+            divProps={{ style: { marginTop: "1rem" } }}
           />
           <DatePicker
             label="Maximum"
             value={max}
-            type="date-hour"
             onChange={onMaxChange}
-            divProps={{ style: { "margin-top": "1rem" } }}
+            divProps={{ style: { marginTop: "1rem" } }}
           />
-          {rangeMode ? (
-            <>
-              <DatePicker
-                label="Range Start"
-                value={initialRange[0]}
-                type="date-hour"
-                onChange={(e) => setInitialRange([e, initialRange[1]])}
-                divProps={{ style: { "margin-top": "1rem" } }}
-              />
-              <DatePicker
-                label="Range End"
-                value={initialRange[1]}
-                type="date-hour"
-                onChange={(e) => setInitialRange([initialRange[0], e])}
-                divProps={{ style: { "margin-top": "1rem" } }}
-              />
-            </>
-          ) : (
-            <DatePicker
-              label="Initial Value"
-              value={initialValue}
-              type="date-hour"
-              onChange={(e) => setInitialValue(e)}
-              divProps={{ style: { "margin-top": "1rem" } }}
-            />
-          )}
           <FlexDiv>
             <NormalInput
               label="Step"
@@ -263,7 +334,7 @@ const SliderMetadata = ({ onChange, values, visualizationRef }) => {
                 options={dateTimeDeltaOptions}
                 divProps={{
                   style: {
-                    "margin-bottom": 0,
+                    marginBottom: 0,
                     bottom: 0,
                     position: "absolute",
                   },
@@ -271,13 +342,55 @@ const SliderMetadata = ({ onChange, values, visualizationRef }) => {
               />
             </TimeDeltaDiv>
           </FlexDiv>
-          <NormalInput
-            label="Output Format"
+          {rangeMode ? (
+            <>
+              <DataSelect
+                label="Range Start"
+                aria-label="Range Start"
+                selectedOption={
+                  initialRange[0] != null
+                    ? { value: initialRange[0], label: initialRange[0] }
+                    : null
+                }
+                onChange={(selected) =>
+                  setInitialRange([selected.value, initialRange[1]])
+                }
+                options={possibleValues.map((v) => ({ value: v, label: v }))}
+                divProps={{ style: { marginTop: "1rem" } }}
+              />
+              <DataSelect
+                label="Range End"
+                aria-label="Range End"
+                selectedOption={
+                  initialRange[1] != null
+                    ? { value: initialRange[1], label: initialRange[1] }
+                    : null
+                }
+                onChange={(selected) =>
+                  setInitialRange([initialRange[0], selected.value])
+                }
+                options={possibleValues.map((v) => ({ value: v, label: v }))}
+                divProps={{ style: { marginTop: "1rem" } }}
+              />
+            </>
+          ) : (
+            <DataSelect
+              label="Initial Value"
+              aria-label="Initial Value"
+              selectedOption={
+                initialValue != null
+                  ? { value: initialValue, label: initialValue }
+                  : null
+              }
+              onChange={(selected) => setInitialValue(selected.value)}
+              options={possibleValues.map((v) => ({ value: v, label: v }))}
+              divProps={{ style: { marginTop: "1rem" } }}
+            />
+          )}
+          <DateFormat
             value={outputFormat}
-            type="text"
-            onChange={(e) => setOutputFormat(e.target.value)}
-            placeholder="date-fns format tokens; e.g., MM/dd/yyyy, MM/dd/yyyy'T'HH:mm"
-            divProps={{ style: { "margin-top": "1rem" } }}
+            onChange={setOutputFormat}
+            divProps={{ style: { marginTop: "1rem" } }}
           />
         </>
       )}
@@ -302,16 +415,13 @@ SliderMetadata.propTypes = {
     dataType: PropTypes.string,
     initialValue: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     initialRange: PropTypes.arrayOf(
-      PropTypes.oneOfType([PropTypes.number, PropTypes.string])
+      PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
     ),
-    rangeMode: PropTypes.string,
+    rangeMode: PropTypes.bool,
     outputFormat: PropTypes.string,
     dateTimeDelta: PropTypes.string, // For slider metadata
+    speedOptions: PropTypes.arrayOf(PropTypes.number),
   }),
-  visualizationRef: PropTypes.oneOfType([
-    PropTypes.func,
-    PropTypes.shape({ current: PropTypes.any }),
-  ]),
 };
 
 export default memo(SliderMetadata);

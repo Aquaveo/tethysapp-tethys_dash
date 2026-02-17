@@ -19,6 +19,7 @@ import createLoadedComponent, {
   EditingPComponent,
   DataViewerPComponent,
   InputVariablePComponent,
+  TabsPComponent,
 } from "__tests__/utilities/customRender";
 import appAPI from "services/api/app";
 import {
@@ -26,6 +27,7 @@ import {
   exampleStyle,
 } from "__tests__/utilities/constants";
 import * as utils from "components/visualizations/utilities";
+import { GridItemContext } from "components/contexts/Contexts";
 
 // eslint-disable-next-line
 jest.mock("components/modals/DataViewer/VisualizationPane", () => () => (
@@ -45,7 +47,7 @@ jest.mock("components/inputs/DeleteConfirmation", () => {
 const mockedConfirm = jest.mocked(confirm);
 
 jest.mock("uuid", () => ({
-  v4: () => 12345678,
+  v4: () => "12345678",
 }));
 
 beforeEach(() => {
@@ -83,27 +85,31 @@ const exampleGeoJSON = {
 
 test("Dashboard Item not editing", async () => {
   const mockedDashboard = JSON.parse(JSON.stringify(userDashboard));
-  const gridItem = mockedDashboard.gridItems[0];
+  const gridItem = mockedDashboard.tabs[0].gridItems[0];
   mockedConfirm.mockResolvedValue(true);
 
   render(
     createLoadedComponent({
       children: (
         <>
-          <DashboardItem
-            gridItemSource={gridItem.source}
-            gridItemI={gridItem.i}
-            gridItemArgsString={gridItem.args_string}
-            gridItemMetadataString={gridItem.metadata_string}
-            gridItemIndex={0}
-          />
+          <GridItemContext.Provider
+            value={{
+              gridItemSource: gridItem.source,
+              gridItemI: gridItem.i,
+              gridItemMetadataString: gridItem.metadata_string,
+              gridItemArgsString: gridItem.args_string,
+              gridItemIndex: 0,
+            }}
+          >
+            <DashboardItem />
+          </GridItemContext.Provider>
           <EditingPComponent />
         </>
       ),
       options: {
         initialDashboard: userDashboard,
       },
-    })
+    }),
   );
 
   const dashboardGridItem = await screen.findByLabelText("gridItemDiv");
@@ -115,29 +121,33 @@ test("Dashboard Item not editing", async () => {
   expect(styles.getPropertyValue("box-shadow")).toBe("none");
 
   expect(
-    screen.queryByLabelText("dashboard-item-dropdown-toggle")
+    screen.queryByLabelText("dashboard-item-dropdown-toggle"),
   ).not.toBeInTheDocument();
   expect(
-    screen.queryByLabelText("attribution-info-icon")
+    screen.queryByLabelText("attribution-info-icon"),
   ).not.toBeInTheDocument();
 });
 
 test("Dashboard Item editing, no custom borders/css", async () => {
   const mockedDashboard = JSON.parse(JSON.stringify(userDashboard));
-  const gridItem = mockedDashboard.gridItems[0];
+  const gridItem = mockedDashboard.tabs[0].gridItems[0];
   mockedConfirm.mockResolvedValue(true);
 
   render(
     createLoadedComponent({
       children: (
         <>
-          <DashboardItem
-            gridItemSource={gridItem.source}
-            gridItemI={gridItem.i}
-            gridItemArgsString={gridItem.args_string}
-            gridItemMetadataString={gridItem.metadata_string}
-            gridItemIndex={0}
-          />
+          <GridItemContext.Provider
+            value={{
+              gridItemSource: gridItem.source,
+              gridItemI: gridItem.i,
+              gridItemMetadataString: gridItem.metadata_string,
+              gridItemArgsString: gridItem.args_string,
+              gridItemIndex: 0,
+            }}
+          >
+            <DashboardItem />
+          </GridItemContext.Provider>
           <EditingPComponent />
         </>
       ),
@@ -145,7 +155,7 @@ test("Dashboard Item editing, no custom borders/css", async () => {
         initialDashboard: userDashboard,
         inEditing: true,
       },
-    })
+    }),
   );
 
   const dashboardGridItem = await screen.findByLabelText("gridItemDiv");
@@ -154,23 +164,23 @@ test("Dashboard Item editing, no custom borders/css", async () => {
 
   await waitFor(() => {
     expect(
-      window.getComputedStyle(dashboardGridItem).getPropertyValue("border")
+      window.getComputedStyle(dashboardGridItem).getPropertyValue("border"),
     ).toBe("1px solid #dcdcdc");
   });
   const styles = window.getComputedStyle(dashboardGridItem);
   expect(styles.getPropertyValue("background-color")).toBe("whitesmoke");
   expect(styles.getPropertyValue("box-shadow")).toBe(
-    "0 4px 8px rgba(0,0,0,0.1)"
+    "0 4px 8px rgba(0, 0, 0, 0.1)",
   );
 
   expect(
-    screen.getByLabelText("dashboard-item-dropdown-toggle")
+    screen.getByLabelText("dashboard-item-dropdown-toggle"),
   ).toBeInTheDocument();
 });
 
 test("Dashboard Item editing, custom borders/css", async () => {
   const mockedDashboard = JSON.parse(JSON.stringify(userDashboard));
-  const gridItem = mockedDashboard.gridItems[0];
+  const gridItem = mockedDashboard.tabs[0].gridItems[0];
   gridItem.metadata_string = JSON.stringify({
     border: {
       "border-left": "1px dashed #f03939",
@@ -185,13 +195,17 @@ test("Dashboard Item editing, custom borders/css", async () => {
     createLoadedComponent({
       children: (
         <>
-          <DashboardItem
-            gridItemSource={gridItem.source}
-            gridItemI={gridItem.i}
-            gridItemArgsString={gridItem.args_string}
-            gridItemMetadataString={gridItem.metadata_string}
-            gridItemIndex={0}
-          />
+          <GridItemContext.Provider
+            value={{
+              gridItemSource: gridItem.source,
+              gridItemI: gridItem.i,
+              gridItemMetadataString: gridItem.metadata_string,
+              gridItemArgsString: gridItem.args_string,
+              gridItemIndex: 0,
+            }}
+          >
+            <DashboardItem />
+          </GridItemContext.Provider>
           <EditingPComponent />
         </>
       ),
@@ -199,7 +213,7 @@ test("Dashboard Item editing, custom borders/css", async () => {
         initialDashboard: userDashboard,
         inEditing: true,
       },
-    })
+    }),
   );
 
   const dashboardGridItem = await screen.findByLabelText("gridItemDiv");
@@ -208,44 +222,51 @@ test("Dashboard Item editing, custom borders/css", async () => {
 
   await waitFor(() => {
     expect(
-      window.getComputedStyle(dashboardGridItem).getPropertyValue("border-left")
+      window
+        .getComputedStyle(dashboardGridItem)
+        .getPropertyValue("border-left"),
     ).toBe("1px dashed #f03939");
   });
   const styles = window.getComputedStyle(dashboardGridItem);
   expect(styles.getPropertyValue("border-right")).toBe(
-    "3px solid rgb(57,84,240)"
+    "3px solid rgb(57, 84, 240)",
   );
   expect(styles.getPropertyValue("border-top")).toBe("");
   expect(styles.getPropertyValue("border-bottom")).toBe("");
   expect(styles.getPropertyValue("border")).toBe("");
   expect(styles.getPropertyValue("background-color")).toBe(
-    "rgba(161, 255, 141, 0.996)"
+    "rgba(161, 255, 141, 0.996)",
   );
   expect(styles.getPropertyValue("box-shadow")).toBe(
-    "4px 0 8px #f03939,-4px 0 8px rgb(57,84,240)"
+    "4px 0 8px #f03939,-4px 0 8px rgb(57, 84, 240)",
   );
 
   expect(
-    await screen.findByLabelText("dashboard-item-dropdown-toggle")
+    await screen.findByLabelText("dashboard-item-dropdown-toggle"),
   ).toBeInTheDocument();
 });
 
 test("Dashboard Item delete grid item", async () => {
   const mockedDashboard = JSON.parse(JSON.stringify(userDashboard));
-  const gridItem = mockedDashboard.gridItems[0];
+  const gridItem = mockedDashboard.tabs[0].gridItems[0];
   mockedConfirm.mockResolvedValue(true);
 
   render(
     createLoadedComponent({
       children: (
         <>
-          <DashboardItem
-            gridItemSource={gridItem.source}
-            gridItemI={gridItem.i}
-            gridItemArgsString={gridItem.args_string}
-            gridItemMetadataString={gridItem.metadata_string}
-            gridItemIndex={0}
-          />
+          <GridItemContext.Provider
+            value={{
+              gridItemSource: gridItem.source,
+              gridItemI: gridItem.i,
+              gridItemMetadataString: gridItem.metadata_string,
+              gridItemArgsString: gridItem.args_string,
+              gridItemIndex: 0,
+            }}
+          >
+            <DashboardItem />
+          </GridItemContext.Provider>
+          <TabsPComponent />
           <ContextLayoutPComponent />
           <EditingPComponent />
         </>
@@ -254,11 +275,11 @@ test("Dashboard Item delete grid item", async () => {
         initialDashboard: userDashboard,
         inEditing: true,
       },
-    })
+    }),
   );
 
   const dashboardItemDropdownToggle = await screen.findByLabelText(
-    "dashboard-item-dropdown-toggle"
+    "dashboard-item-dropdown-toggle",
   );
   await userEvent.click(dashboardItemDropdownToggle);
 
@@ -266,30 +287,39 @@ test("Dashboard Item delete grid item", async () => {
   await userEvent.click(deleteGridItemButton);
 
   let expectedDashboard = JSON.parse(JSON.stringify(mockedDashboard));
-  expectedDashboard.gridItems = [];
+  expectedDashboard.tabs[0].gridItems = [];
 
+  let { tabs, ...dashboardContextProperties } = expectedDashboard;
   expect(await screen.findByTestId("layout-context")).toHaveTextContent(
-    JSON.stringify({ ...expectedDashboard, editable: true })
+    JSON.stringify({ ...dashboardContextProperties, editable: true }),
+  );
+  expect(await screen.findByTestId("tabs-context")).toHaveTextContent(
+    JSON.stringify({ tabs: [...tabs], activeTabId: tabs[0].id }),
   );
   expect(await screen.findByTestId("editing")).toHaveTextContent("editing");
 });
 
 test("Dashboard Item delete grid item cancel", async () => {
   const mockedDashboard = JSON.parse(JSON.stringify(userDashboard));
-  const gridItem = mockedDashboard.gridItems[0];
+  const gridItem = mockedDashboard.tabs[0].gridItems[0];
   mockedConfirm.mockResolvedValue(false);
 
   render(
     createLoadedComponent({
       children: (
         <>
-          <DashboardItem
-            gridItemSource={gridItem.source}
-            gridItemI={gridItem.i}
-            gridItemArgsString={gridItem.args_string}
-            gridItemMetadataString={gridItem.metadata_string}
-            gridItemIndex={0}
-          />
+          <GridItemContext.Provider
+            value={{
+              gridItemSource: gridItem.source,
+              gridItemI: gridItem.i,
+              gridItemMetadataString: gridItem.metadata_string,
+              gridItemArgsString: gridItem.args_string,
+              gridItemIndex: 0,
+            }}
+          >
+            <DashboardItem />
+          </GridItemContext.Provider>
+          <TabsPComponent />
           <ContextLayoutPComponent />
           <EditingPComponent />
         </>
@@ -298,11 +328,11 @@ test("Dashboard Item delete grid item cancel", async () => {
         initialDashboard: userDashboard,
         inEditing: true,
       },
-    })
+    }),
   );
 
   const dashboardItemDropdownToggle = await screen.findByLabelText(
-    "dashboard-item-dropdown-toggle"
+    "dashboard-item-dropdown-toggle",
   );
   await userEvent.click(dashboardItemDropdownToggle);
 
@@ -310,8 +340,10 @@ test("Dashboard Item delete grid item cancel", async () => {
   await userEvent.click(deleteGridItemButton);
 
   let expectedDashboard = JSON.parse(JSON.stringify(mockedDashboard));
-  expectedDashboard.gridItems = [
+  expectedDashboard.tabs[0].gridItems = [
     {
+      id: 1,
+      uuid: "some-uuid-1",
       i: "1",
       x: 0,
       y: 0,
@@ -324,8 +356,12 @@ test("Dashboard Item delete grid item cancel", async () => {
       }),
     },
   ];
+  let { tabs, ...dashboardContextProperties } = expectedDashboard;
   expect(await screen.findByTestId("layout-context")).toHaveTextContent(
-    JSON.stringify({ ...expectedDashboard, editable: true })
+    JSON.stringify({ ...dashboardContextProperties, editable: true }),
+  );
+  expect(await screen.findByTestId("tabs-context")).toHaveTextContent(
+    JSON.stringify({ tabs: [...tabs], activeTabId: tabs[0].id }),
   );
 
   expect(await screen.findByTestId("editing")).toHaveTextContent("editing");
@@ -333,19 +369,23 @@ test("Dashboard Item delete grid item cancel", async () => {
 
 test("Dashboard Item edit item", async () => {
   const mockedDashboard = JSON.parse(JSON.stringify(userDashboard));
-  const gridItem = mockedDashboard.gridItems[0];
+  const gridItem = mockedDashboard.tabs[0].gridItems[0];
 
   render(
     createLoadedComponent({
       children: (
         <>
-          <DashboardItem
-            gridItemSource={gridItem.source}
-            gridItemI={gridItem.i}
-            gridItemArgsString={gridItem.args_string}
-            gridItemMetadataString={gridItem.metadata_string}
-            gridItemIndex={0}
-          />
+          <GridItemContext.Provider
+            value={{
+              gridItemSource: gridItem.source,
+              gridItemI: gridItem.i,
+              gridItemMetadataString: gridItem.metadata_string,
+              gridItemArgsString: gridItem.args_string,
+              gridItemIndex: 0,
+            }}
+          >
+            <DashboardItem />
+          </GridItemContext.Provider>
           <ContextLayoutPComponent />
           <EditingPComponent />
           <DataViewerPComponent />
@@ -355,11 +395,11 @@ test("Dashboard Item edit item", async () => {
         initialDashboard: mockedDashboard,
         inEditing: true,
       },
-    })
+    }),
   );
 
   const dashboardItemDropdownToggle = await screen.findByLabelText(
-    "dashboard-item-dropdown-toggle"
+    "dashboard-item-dropdown-toggle",
   );
   await userEvent.click(dashboardItemDropdownToggle);
 
@@ -371,21 +411,23 @@ test("Dashboard Item edit item", async () => {
 
   expect(await screen.findByTestId("editing")).toHaveTextContent("editing");
   expect(await screen.findByTestId("dataviewer-mode")).toHaveTextContent(
-    "dataviewer-mode"
+    "dataviewer-mode",
   );
 
   const closeDataViewerModalButton = within(dataViewerModal).getByText("Close");
   fireEvent.click(closeDataViewerModalButton);
   expect(await screen.findByTestId("dataviewer-mode")).toHaveTextContent(
-    "not in dataviewer-mode"
+    "not in dataviewer-mode",
   );
 });
 
 test("Dashboard Item copy item", async () => {
   const updatedMockedDashboards = JSON.parse(JSON.stringify(mockedDashboards));
   const mockedDashboard = updatedMockedDashboards.dashboards[0];
-  mockedDashboard.gridItems = [
+  mockedDashboard.tabs[0].gridItems = [
     {
+      id: 1,
+      uuid: "some-uuid-1",
       i: "1",
       x: 0,
       y: 0,
@@ -398,6 +440,8 @@ test("Dashboard Item copy item", async () => {
       }),
     },
     {
+      id: 3,
+      uuid: "some-uuid-3",
       i: "3",
       x: 0,
       y: 0,
@@ -410,6 +454,8 @@ test("Dashboard Item copy item", async () => {
       }),
     },
     {
+      id: 2,
+      uuid: "some-uuid-2",
       i: "2",
       x: 0,
       y: 0,
@@ -423,19 +469,24 @@ test("Dashboard Item copy item", async () => {
     },
   ];
 
-  const gridItem = mockedDashboard.gridItems[2];
+  const gridItem = mockedDashboard.tabs[0].gridItems[2];
 
   render(
     createLoadedComponent({
       children: (
         <>
-          <DashboardItem
-            gridItemSource={gridItem.source}
-            gridItemI={gridItem.i}
-            gridItemArgsString={gridItem.args_string}
-            gridItemMetadataString={gridItem.metadata_string}
-            gridItemIndex={2}
-          />
+          <GridItemContext.Provider
+            value={{
+              gridItemSource: gridItem.source,
+              gridItemI: gridItem.i,
+              gridItemMetadataString: gridItem.metadata_string,
+              gridItemArgsString: gridItem.args_string,
+              gridItemIndex: 0,
+            }}
+          >
+            <DashboardItem />
+          </GridItemContext.Provider>
+          <TabsPComponent />
           <ContextLayoutPComponent />
           <EditingPComponent />
         </>
@@ -445,11 +496,11 @@ test("Dashboard Item copy item", async () => {
         initialDashboard: mockedDashboard,
         inEditing: true,
       },
-    })
+    }),
   );
 
   const dashboardItemDropdownToggle = await screen.findByLabelText(
-    "dashboard-item-dropdown-toggle"
+    "dashboard-item-dropdown-toggle",
   );
   await userEvent.click(dashboardItemDropdownToggle);
 
@@ -457,8 +508,10 @@ test("Dashboard Item copy item", async () => {
   await userEvent.click(createCopyButton);
 
   let expectedDashboard = JSON.parse(JSON.stringify(mockedDashboard));
-  expectedDashboard.gridItems = [
+  expectedDashboard.tabs[0].gridItems = [
     {
+      id: 1,
+      uuid: "some-uuid-1",
       i: "1",
       x: 0,
       y: 0,
@@ -471,6 +524,8 @@ test("Dashboard Item copy item", async () => {
       }),
     },
     {
+      id: 3,
+      uuid: "some-uuid-3",
       i: "3",
       x: 0,
       y: 0,
@@ -483,6 +538,8 @@ test("Dashboard Item copy item", async () => {
       }),
     },
     {
+      id: 2,
+      uuid: "some-uuid-2",
       i: "2",
       x: 0,
       y: 0,
@@ -495,6 +552,8 @@ test("Dashboard Item copy item", async () => {
       }),
     },
     {
+      id: null,
+      uuid: "12345678",
       i: "4",
       x: 0,
       y: 0,
@@ -507,8 +566,13 @@ test("Dashboard Item copy item", async () => {
       }),
     },
   ];
+
+  let { tabs, ...dashboardContextProperties } = expectedDashboard;
   expect(await screen.findByTestId("layout-context")).toHaveTextContent(
-    JSON.stringify({ ...expectedDashboard, editable: true })
+    JSON.stringify({ ...dashboardContextProperties, editable: true }),
+  );
+  expect(await screen.findByTestId("tabs-context")).toHaveTextContent(
+    JSON.stringify({ tabs: [...tabs], activeTabId: tabs[0].id }),
   );
   expect(await screen.findByTestId("editing")).toHaveTextContent("editing");
 });
@@ -516,8 +580,10 @@ test("Dashboard Item copy item", async () => {
 test("Dashboard Item copy item variable input", async () => {
   const updatedMockedDashboards = JSON.parse(JSON.stringify(mockedDashboards));
   const mockedDashboard = updatedMockedDashboards.dashboards[0];
-  mockedDashboard.gridItems = [
+  mockedDashboard.tabs[0].gridItems = [
     {
+      id: 1,
+      uuid: "some-uuid-1",
       i: "1",
       x: 0,
       y: 0,
@@ -534,20 +600,25 @@ test("Dashboard Item copy item variable input", async () => {
       }),
     },
   ];
-  const gridItem = mockedDashboard.gridItems[0];
+  const gridItem = mockedDashboard.tabs[0].gridItems[0];
 
   render(
     createLoadedComponent({
       children: (
         <>
-          <DashboardItem
-            gridItemSource={gridItem.source}
-            gridItemI={gridItem.i}
-            gridItemArgsString={gridItem.args_string}
-            gridItemMetadataString={gridItem.metadata_string}
-            gridItemIndex={2}
-          />
+          <GridItemContext.Provider
+            value={{
+              gridItemSource: gridItem.source,
+              gridItemI: gridItem.i,
+              gridItemMetadataString: gridItem.metadata_string,
+              gridItemArgsString: gridItem.args_string,
+              gridItemIndex: 0,
+            }}
+          >
+            <DashboardItem />
+          </GridItemContext.Provider>
           <ContextLayoutPComponent />
+          <TabsPComponent />
           <EditingPComponent />
           <InputVariablePComponent />
         </>
@@ -557,11 +628,11 @@ test("Dashboard Item copy item variable input", async () => {
         initialDashboard: mockedDashboard,
         inEditing: true,
       },
-    })
+    }),
   );
 
   const dashboardItemDropdownToggle = await screen.findByLabelText(
-    "dashboard-item-dropdown-toggle"
+    "dashboard-item-dropdown-toggle",
   );
   await userEvent.click(dashboardItemDropdownToggle);
 
@@ -569,8 +640,10 @@ test("Dashboard Item copy item variable input", async () => {
   await userEvent.click(createCopyButton);
 
   let expectedDashboard = JSON.parse(JSON.stringify(mockedDashboard));
-  expectedDashboard.gridItems = [
+  expectedDashboard.tabs[0].gridItems = [
     {
+      id: 1,
+      uuid: "some-uuid-1",
       i: "1",
       x: 0,
       y: 0,
@@ -587,6 +660,8 @@ test("Dashboard Item copy item variable input", async () => {
       }),
     },
     {
+      id: null,
+      uuid: "12345678",
       i: "2",
       x: 0,
       y: 0,
@@ -603,8 +678,12 @@ test("Dashboard Item copy item variable input", async () => {
       }),
     },
   ];
+  let { tabs, ...dashboardContextProperties } = expectedDashboard;
   expect(await screen.findByTestId("layout-context")).toHaveTextContent(
-    JSON.stringify({ ...expectedDashboard, editable: true })
+    JSON.stringify({ ...dashboardContextProperties, editable: true }),
+  );
+  expect(await screen.findByTestId("tabs-context")).toHaveTextContent(
+    JSON.stringify({ tabs: [...tabs], activeTabId: tabs[0].id }),
   );
 
   expect(await screen.findByTestId("editing")).toHaveTextContent("editing");
@@ -612,15 +691,17 @@ test("Dashboard Item copy item variable input", async () => {
     JSON.stringify({
       test_var: true,
       test_var_1: true,
-    })
+    }),
   );
 });
 
 test("Dashboard Item copy item variable input already exists", async () => {
   const updatedMockedDashboards = JSON.parse(JSON.stringify(mockedDashboards));
   const mockedDashboard = updatedMockedDashboards.dashboards[0];
-  mockedDashboard.gridItems = [
+  mockedDashboard.tabs[0].gridItems = [
     {
+      id: 1,
+      uuid: "some-uuid-1",
       i: "1",
       x: 0,
       y: 0,
@@ -637,6 +718,8 @@ test("Dashboard Item copy item variable input already exists", async () => {
       }),
     },
     {
+      id: 2,
+      uuid: "some-uuid-2",
       i: "2",
       x: 0,
       y: 0,
@@ -653,20 +736,25 @@ test("Dashboard Item copy item variable input already exists", async () => {
       }),
     },
   ];
-  const gridItem = mockedDashboard.gridItems[0];
+  const gridItem = mockedDashboard.tabs[0].gridItems[0];
 
   render(
     createLoadedComponent({
       children: (
         <>
-          <DashboardItem
-            gridItemSource={gridItem.source}
-            gridItemI={gridItem.i}
-            gridItemArgsString={gridItem.args_string}
-            gridItemMetadataString={gridItem.metadata_string}
-            gridItemIndex={0}
-          />
+          <GridItemContext.Provider
+            value={{
+              gridItemSource: gridItem.source,
+              gridItemI: gridItem.i,
+              gridItemMetadataString: gridItem.metadata_string,
+              gridItemArgsString: gridItem.args_string,
+              gridItemIndex: 0,
+            }}
+          >
+            <DashboardItem />
+          </GridItemContext.Provider>
           <ContextLayoutPComponent />
+          <TabsPComponent />
           <EditingPComponent />
           <InputVariablePComponent />
         </>
@@ -676,11 +764,11 @@ test("Dashboard Item copy item variable input already exists", async () => {
         initialDashboard: mockedDashboard,
         inEditing: true,
       },
-    })
+    }),
   );
 
   const dashboardItemDropdownToggle = await screen.findByLabelText(
-    "dashboard-item-dropdown-toggle"
+    "dashboard-item-dropdown-toggle",
   );
   await userEvent.click(dashboardItemDropdownToggle);
 
@@ -688,8 +776,10 @@ test("Dashboard Item copy item variable input already exists", async () => {
   await userEvent.click(createCopyButton);
 
   let expectedDashboard = JSON.parse(JSON.stringify(mockedDashboard));
-  expectedDashboard.gridItems = [
+  expectedDashboard.tabs[0].gridItems = [
     {
+      id: 1,
+      uuid: "some-uuid-1",
       i: "1",
       x: 0,
       y: 0,
@@ -706,6 +796,8 @@ test("Dashboard Item copy item variable input already exists", async () => {
       }),
     },
     {
+      id: 2,
+      uuid: "some-uuid-2",
       i: "2",
       x: 0,
       y: 0,
@@ -722,6 +814,8 @@ test("Dashboard Item copy item variable input already exists", async () => {
       }),
     },
     {
+      id: null,
+      uuid: "12345678",
       i: "3",
       x: 0,
       y: 0,
@@ -738,8 +832,12 @@ test("Dashboard Item copy item variable input already exists", async () => {
       }),
     },
   ];
+  let { tabs, ...dashboardContextProperties } = expectedDashboard;
   expect(await screen.findByTestId("layout-context")).toHaveTextContent(
-    JSON.stringify({ ...expectedDashboard, editable: true })
+    JSON.stringify({ ...dashboardContextProperties, editable: true }),
+  );
+  expect(await screen.findByTestId("tabs-context")).toHaveTextContent(
+    JSON.stringify({ tabs: [...tabs], activeTabId: tabs[0].id }),
   );
 
   expect(await screen.findByTestId("editing")).toHaveTextContent("editing");
@@ -748,7 +846,7 @@ test("Dashboard Item copy item variable input already exists", async () => {
       test_var: true,
       test_var_1: true,
       test_var_2: true,
-    })
+    }),
   );
 });
 
@@ -756,7 +854,7 @@ test("Dashboard Item order options disabled for single grid item", async () => {
   const updatedMockedDashboards = JSON.parse(JSON.stringify(mockedDashboards));
   const mockedDashboard = updatedMockedDashboards.dashboards[0];
   mockedDashboard.unrestrictedPlacement = true;
-  const gridItem = mockedDashboard.gridItems[0];
+  const gridItem = mockedDashboard.tabs[0].gridItems[0];
   gridItem.source = "Custom Image";
   gridItem.args_string = JSON.stringify({
     image_source: "https://www.aquaveo.com/images/aquaveo_logo.svg",
@@ -765,24 +863,28 @@ test("Dashboard Item order options disabled for single grid item", async () => {
   render(
     createLoadedComponent({
       children: (
-        <DashboardItem
-          gridItemSource={gridItem.source}
-          gridItemI={gridItem.i}
-          gridItemArgsString={gridItem.args_string}
-          gridItemMetadataString={gridItem.metadata_string}
-          gridItemIndex={0}
-        />
+        <GridItemContext.Provider
+          value={{
+            gridItemSource: gridItem.source,
+            gridItemI: gridItem.i,
+            gridItemMetadataString: gridItem.metadata_string,
+            gridItemArgsString: gridItem.args_string,
+            gridItemIndex: 0,
+          }}
+        >
+          <DashboardItem />
+        </GridItemContext.Provider>
       ),
       options: {
         dashboards: updatedMockedDashboards,
         initialDashboard: mockedDashboard,
         inEditing: true,
       },
-    })
+    }),
   );
 
   const dashboardItemDropdownToggle = await screen.findByLabelText(
-    "dashboard-item-dropdown-toggle"
+    "dashboard-item-dropdown-toggle",
   );
   await userEvent.click(dashboardItemDropdownToggle);
 
@@ -880,21 +982,25 @@ test("Dashboard Item order forward", async () => {
     }),
   };
   const gridItems = [greenGridItem, blueGridItem, redGridItem, yellowGridItem];
-  mockedDashboard.gridItems = gridItems;
+  mockedDashboard.tabs[0].gridItems = gridItems;
   const gridItem = gridItems[1];
 
   render(
     createLoadedComponent({
       children: (
         <>
-          <DashboardItem
-            gridItemSource={gridItem.source}
-            gridItemI={gridItem.i}
-            gridItemArgsString={gridItem.args_string}
-            gridItemMetadataString={gridItem.metadata_string}
-            gridItemIndex={1}
-          />
-
+          <GridItemContext.Provider
+            value={{
+              gridItemSource: gridItem.source,
+              gridItemI: gridItem.i,
+              gridItemMetadataString: gridItem.metadata_string,
+              gridItemArgsString: gridItem.args_string,
+              gridItemIndex: 1,
+            }}
+          >
+            <DashboardItem />
+          </GridItemContext.Provider>
+          <TabsPComponent />
           <ContextLayoutPComponent />
         </>
       ),
@@ -903,11 +1009,11 @@ test("Dashboard Item order forward", async () => {
         initialDashboard: mockedDashboard,
         inEditing: true,
       },
-    })
+    }),
   );
 
   const dashboardItemDropdownToggle = await screen.findByLabelText(
-    "dashboard-item-dropdown-toggle"
+    "dashboard-item-dropdown-toggle",
   );
   await userEvent.click(dashboardItemDropdownToggle);
 
@@ -920,14 +1026,18 @@ test("Dashboard Item order forward", async () => {
   await userEvent.click(bringToFrontOption);
 
   let expectedDashboard = JSON.parse(JSON.stringify(mockedDashboard));
-  expectedDashboard.gridItems = [
+  expectedDashboard.tabs[0].gridItems = [
     greenGridItem,
     redGridItem,
     yellowGridItem,
     blueGridItem,
   ];
+  let { tabs, ...dashboardContextProperties } = expectedDashboard;
   expect(await screen.findByTestId("layout-context")).toHaveTextContent(
-    JSON.stringify({ ...expectedDashboard, editable: true })
+    JSON.stringify({ ...dashboardContextProperties, editable: true }),
+  );
+  expect(await screen.findByTestId("tabs-context")).toHaveTextContent(
+    JSON.stringify({ tabs: [...tabs], activeTabId: tabs[0].id }),
   );
 
   await userEvent.click(dashboardItemDropdownToggle);
@@ -941,14 +1051,18 @@ test("Dashboard Item order forward", async () => {
   await userEvent.click(bringForwardOption);
 
   expectedDashboard = JSON.parse(JSON.stringify(mockedDashboard));
-  expectedDashboard.gridItems = [
+  expectedDashboard.tabs[0].gridItems = [
     greenGridItem,
     yellowGridItem,
     redGridItem,
     blueGridItem,
   ];
+  ({ tabs, ...dashboardContextProperties } = expectedDashboard);
   expect(await screen.findByTestId("layout-context")).toHaveTextContent(
-    JSON.stringify({ ...expectedDashboard, editable: true })
+    JSON.stringify({ ...dashboardContextProperties, editable: true }),
+  );
+  expect(await screen.findByTestId("tabs-context")).toHaveTextContent(
+    JSON.stringify({ tabs: [...tabs], activeTabId: tabs[0].id }),
   );
 });
 
@@ -1025,21 +1139,25 @@ test("Dashboard Item order backward", async () => {
     }),
   };
   const gridItems = [greenGridItem, blueGridItem, redGridItem, yellowGridItem];
-  mockedDashboard.gridItems = gridItems;
+  mockedDashboard.tabs[0].gridItems = gridItems;
   const gridItem = gridItems[1];
 
   render(
     createLoadedComponent({
       children: (
         <>
-          <DashboardItem
-            gridItemSource={gridItem.source}
-            gridItemI={gridItem.i}
-            gridItemArgsString={gridItem.args_string}
-            gridItemMetadataString={gridItem.metadata_string}
-            gridItemIndex={2}
-          />
-
+          <GridItemContext.Provider
+            value={{
+              gridItemSource: gridItem.source,
+              gridItemI: gridItem.i,
+              gridItemMetadataString: gridItem.metadata_string,
+              gridItemArgsString: gridItem.args_string,
+              gridItemIndex: 2,
+            }}
+          >
+            <DashboardItem />
+          </GridItemContext.Provider>
+          <TabsPComponent />
           <ContextLayoutPComponent />
         </>
       ),
@@ -1048,11 +1166,11 @@ test("Dashboard Item order backward", async () => {
         initialDashboard: mockedDashboard,
         inEditing: true,
       },
-    })
+    }),
   );
 
   const dashboardItemDropdownToggle = await screen.findByLabelText(
-    "dashboard-item-dropdown-toggle"
+    "dashboard-item-dropdown-toggle",
   );
   await userEvent.click(dashboardItemDropdownToggle);
 
@@ -1065,14 +1183,18 @@ test("Dashboard Item order backward", async () => {
   await userEvent.click(sendToBackOption);
 
   let expectedDashboard = JSON.parse(JSON.stringify(mockedDashboard));
-  expectedDashboard.gridItems = [
+  expectedDashboard.tabs[0].gridItems = [
     redGridItem,
     greenGridItem,
     blueGridItem,
     yellowGridItem,
   ];
+  let { tabs, ...dashboardContextProperties } = expectedDashboard;
   expect(await screen.findByTestId("layout-context")).toHaveTextContent(
-    JSON.stringify({ ...expectedDashboard, editable: true })
+    JSON.stringify({ ...dashboardContextProperties, editable: true }),
+  );
+  expect(await screen.findByTestId("tabs-context")).toHaveTextContent(
+    JSON.stringify({ tabs: [...tabs], activeTabId: tabs[0].id }),
   );
 
   await userEvent.click(dashboardItemDropdownToggle);
@@ -1085,21 +1207,25 @@ test("Dashboard Item order backward", async () => {
   expect(sendBackwardOption).toBeInTheDocument();
   await userEvent.click(sendBackwardOption);
 
-  expectedDashboard.gridItems = [
+  expectedDashboard.tabs[0].gridItems = [
     redGridItem,
     blueGridItem,
     greenGridItem,
     yellowGridItem,
   ];
+  ({ tabs, ...dashboardContextProperties } = expectedDashboard);
   expect(await screen.findByTestId("layout-context")).toHaveTextContent(
-    JSON.stringify({ ...expectedDashboard, editable: true })
+    JSON.stringify({ ...dashboardContextProperties, editable: true }),
+  );
+  expect(await screen.findByTestId("tabs-context")).toHaveTextContent(
+    JSON.stringify({ tabs: [...tabs], activeTabId: tabs[0].id }),
   );
 });
 
 test("Dashboard Item export", async () => {
   const updatedMockedDashboards = JSON.parse(JSON.stringify(mockedDashboards));
   const mockedDashboard = updatedMockedDashboards.dashboards[0];
-  const gridItem = mockedDashboard.gridItems[0];
+  const gridItem = mockedDashboard.tabs[0].gridItems[0];
   gridItem.source = "Custom Image";
   gridItem.args_string = JSON.stringify({
     image_source: "https://www.aquaveo.com/images/aquaveo_logo.svg",
@@ -1111,24 +1237,28 @@ test("Dashboard Item export", async () => {
   render(
     createLoadedComponent({
       children: (
-        <DashboardItem
-          gridItemSource={gridItem.source}
-          gridItemI={gridItem.i}
-          gridItemArgsString={gridItem.args_string}
-          gridItemMetadataString={gridItem.metadata_string}
-          gridItemIndex={0}
-        />
+        <GridItemContext.Provider
+          value={{
+            gridItemSource: gridItem.source,
+            gridItemI: gridItem.i,
+            gridItemMetadataString: gridItem.metadata_string,
+            gridItemArgsString: gridItem.args_string,
+            gridItemIndex: 0,
+          }}
+        >
+          <DashboardItem />
+        </GridItemContext.Provider>
       ),
       options: {
         dashboards: updatedMockedDashboards,
         initialDashboard: mockedDashboard,
         inEditing: true,
       },
-    })
+    }),
   );
 
   const dashboardItemDropdownToggle = await screen.findByLabelText(
-    "dashboard-item-dropdown-toggle"
+    "dashboard-item-dropdown-toggle",
   );
   await userEvent.click(dashboardItemDropdownToggle);
 
@@ -1150,14 +1280,14 @@ test("Dashboard Item export", async () => {
       x: 0,
       y: 0,
     },
-    "TethysDashGridItem.json"
+    "TethysDashGridItem.json",
   );
 });
 
 test("Dashboard Item export fail", async () => {
   const updatedMockedDashboards = JSON.parse(JSON.stringify(mockedDashboards));
   const mockedDashboard = updatedMockedDashboards.dashboards[0];
-  const gridItem = mockedDashboard.gridItems[0];
+  const gridItem = mockedDashboard.tabs[0].gridItems[0];
   gridItem.source = "Custom Image";
   gridItem.args_string = JSON.stringify({
     image_source: "https://www.aquaveo.com/images/aquaveo_logo.svg",
@@ -1171,24 +1301,28 @@ test("Dashboard Item export fail", async () => {
   render(
     createLoadedComponent({
       children: (
-        <DashboardItem
-          gridItemSource={gridItem.source}
-          gridItemI={gridItem.i}
-          gridItemArgsString={gridItem.args_string}
-          gridItemMetadataString={gridItem.metadata_string}
-          gridItemIndex={0}
-        />
+        <GridItemContext.Provider
+          value={{
+            gridItemSource: gridItem.source,
+            gridItemI: gridItem.i,
+            gridItemMetadataString: gridItem.metadata_string,
+            gridItemArgsString: gridItem.args_string,
+            gridItemIndex: 0,
+          }}
+        >
+          <DashboardItem />
+        </GridItemContext.Provider>
       ),
       options: {
         dashboards: updatedMockedDashboards,
         initialDashboard: mockedDashboard,
         inEditing: true,
       },
-    })
+    }),
   );
 
   const dashboardItemDropdownToggle = await screen.findByLabelText(
-    "dashboard-item-dropdown-toggle"
+    "dashboard-item-dropdown-toggle",
   );
   await userEvent.click(dashboardItemDropdownToggle);
 
@@ -1210,16 +1344,16 @@ test("Dashboard Item export fail", async () => {
       x: 0,
       y: 0,
     },
-    "TethysDashGridItem.json"
+    "TethysDashGridItem.json",
   );
   expect(
-    await screen.findByText("Failed to export grid item.")
+    await screen.findByText("Failed to export grid item."),
   ).toBeInTheDocument();
 });
 
 test("Dashboard attribution and show", async () => {
   const mockedDashboard = JSON.parse(JSON.stringify(userDashboard));
-  const gridItem = mockedDashboard.gridItems[0];
+  const gridItem = mockedDashboard.tabs[0].gridItems[0];
   gridItem.source = "plugin_source_checkbox";
   mockedConfirm.mockResolvedValue(true);
 
@@ -1246,13 +1380,17 @@ test("Dashboard attribution and show", async () => {
     createLoadedComponent({
       children: (
         <>
-          <DashboardItem
-            gridItemSource={gridItem.source}
-            gridItemI={gridItem.i}
-            gridItemArgsString={gridItem.args_string}
-            gridItemMetadataString={gridItem.metadata_string}
-            gridItemIndex={0}
-          />
+          <GridItemContext.Provider
+            value={{
+              gridItemSource: gridItem.source,
+              gridItemI: gridItem.i,
+              gridItemMetadataString: gridItem.metadata_string,
+              gridItemArgsString: gridItem.args_string,
+              gridItemIndex: 0,
+            }}
+          >
+            <DashboardItem />
+          </GridItemContext.Provider>
           <EditingPComponent />
         </>
       ),
@@ -1260,42 +1398,49 @@ test("Dashboard attribution and show", async () => {
         initialDashboard: userDashboard,
         visualizations: availableVisualizations,
       },
-    })
+    }),
   );
 
   const dashboardGridItem = await screen.findByLabelText("gridItemDiv");
   expect(dashboardGridItem).toBeInTheDocument();
 
+  // The icon wrapper is now a div with aria-label
   const attributionIcon = await screen.findByLabelText("attribution-info-icon");
   expect(attributionIcon).toBeInTheDocument();
 
-  const tooltip = screen.getByLabelText("attribution-tooltip");
+  // Tooltip is rendered but hidden initially
+  let tooltip = screen.getByLabelText("attribution-tooltip");
   expect(tooltip).not.toBeVisible();
 
-  fireEvent.mouseEnter(attributionIcon);
-
+  // Mouse enter the icon's child div (the inline-block wrapper)
+  // eslint-disable-next-line testing-library/no-node-access
+  const iconHoverDiv = attributionIcon.querySelector("div");
+  fireEvent.mouseEnter(iconHoverDiv);
+  tooltip = screen.getByLabelText("attribution-tooltip");
   expect(tooltip).toBeVisible();
 
-  fireEvent.mouseLeave(attributionIcon);
-
+  // Mouse leave the icon's child div
+  fireEvent.mouseLeave(iconHoverDiv);
+  tooltip = screen.getByLabelText("attribution-tooltip");
   expect(tooltip).not.toBeVisible();
 
-  fireEvent.mouseEnter(attributionIcon);
-
+  // Mouse enter again
+  fireEvent.mouseEnter(iconHoverDiv);
+  tooltip = screen.getByLabelText("attribution-tooltip");
   expect(tooltip).toBeVisible();
 
+  // Mouse enter the tooltip itself
   fireEvent.mouseEnter(tooltip);
-
   expect(tooltip).toBeVisible();
 
+  // Mouse leave the tooltip
   fireEvent.mouseLeave(tooltip);
-
   expect(tooltip).not.toBeVisible();
 });
 
 test("Dashboard attribution www link and show", async () => {
   const mockedDashboard = JSON.parse(JSON.stringify(userDashboard));
-  const gridItem = mockedDashboard.gridItems[0];
+  const gridItem = mockedDashboard.tabs[0].gridItems[0];
   gridItem.source = "plugin_source_checkbox";
   mockedConfirm.mockResolvedValue(true);
 
@@ -1322,13 +1467,17 @@ test("Dashboard attribution www link and show", async () => {
     createLoadedComponent({
       children: (
         <>
-          <DashboardItem
-            gridItemSource={gridItem.source}
-            gridItemI={gridItem.i}
-            gridItemArgsString={gridItem.args_string}
-            gridItemMetadataString={gridItem.metadata_string}
-            gridItemIndex={0}
-          />
+          <GridItemContext.Provider
+            value={{
+              gridItemSource: gridItem.source,
+              gridItemI: gridItem.i,
+              gridItemMetadataString: gridItem.metadata_string,
+              gridItemArgsString: gridItem.args_string,
+              gridItemIndex: 0,
+            }}
+          >
+            <DashboardItem />
+          </GridItemContext.Provider>
           <EditingPComponent />
         </>
       ),
@@ -1336,7 +1485,7 @@ test("Dashboard attribution www link and show", async () => {
         initialDashboard: userDashboard,
         visualizations: availableVisualizations,
       },
-    })
+    }),
   );
 
   const dashboardGridItem = await screen.findByLabelText("gridItemDiv");
@@ -1345,29 +1494,29 @@ test("Dashboard attribution www link and show", async () => {
   const attributionIcon = await screen.findByLabelText("attribution-info-icon");
   expect(attributionIcon).toBeInTheDocument();
 
-  const tooltip = screen.getByLabelText("attribution-tooltip");
+  let tooltip = screen.getByLabelText("attribution-tooltip");
   expect(tooltip).not.toBeVisible();
 
-  fireEvent.mouseEnter(attributionIcon);
-
-  // Tooltip should now be visible
-  const tooltipAfter = await screen.findByLabelText("attribution-tooltip");
-  expect(tooltipAfter).toBeVisible();
+  // eslint-disable-next-line testing-library/no-node-access
+  const iconHoverDiv = attributionIcon.querySelector("div");
+  fireEvent.mouseEnter(iconHoverDiv);
+  tooltip = await screen.findByLabelText("attribution-tooltip");
+  expect(tooltip).toBeVisible();
 
   // Check that the attribution text contains a link with the correct URL and text
-  const link = within(tooltipAfter).getByRole("link", {
+  const link = within(tooltip).getByRole("link", {
     name: "www.example.com",
   });
   expect(link).toBeInTheDocument();
   expect(link).toHaveAttribute("href", "http://www.example.com");
 
   // Optionally, check that the rest of the text is present
-  expect(tooltipAfter).toHaveTextContent("Some Attribution Text");
+  expect(tooltip).toHaveTextContent("Some Attribution Text");
 });
 
 test("Dashboard attribution https link and show", async () => {
   const mockedDashboard = JSON.parse(JSON.stringify(userDashboard));
-  const gridItem = mockedDashboard.gridItems[0];
+  const gridItem = mockedDashboard.tabs[0].gridItems[0];
   gridItem.source = "plugin_source_checkbox";
   mockedConfirm.mockResolvedValue(true);
 
@@ -1394,13 +1543,17 @@ test("Dashboard attribution https link and show", async () => {
     createLoadedComponent({
       children: (
         <>
-          <DashboardItem
-            gridItemSource={gridItem.source}
-            gridItemI={gridItem.i}
-            gridItemArgsString={gridItem.args_string}
-            gridItemMetadataString={gridItem.metadata_string}
-            gridItemIndex={0}
-          />
+          <GridItemContext.Provider
+            value={{
+              gridItemSource: gridItem.source,
+              gridItemI: gridItem.i,
+              gridItemMetadataString: gridItem.metadata_string,
+              gridItemArgsString: gridItem.args_string,
+              gridItemIndex: 0,
+            }}
+          >
+            <DashboardItem />
+          </GridItemContext.Provider>
           <EditingPComponent />
         </>
       ),
@@ -1408,7 +1561,7 @@ test("Dashboard attribution https link and show", async () => {
         initialDashboard: userDashboard,
         visualizations: availableVisualizations,
       },
-    })
+    }),
   );
 
   const dashboardGridItem = await screen.findByLabelText("gridItemDiv");
@@ -1417,29 +1570,29 @@ test("Dashboard attribution https link and show", async () => {
   const attributionIcon = await screen.findByLabelText("attribution-info-icon");
   expect(attributionIcon).toBeInTheDocument();
 
-  const tooltip = screen.getByLabelText("attribution-tooltip");
+  let tooltip = screen.getByLabelText("attribution-tooltip");
   expect(tooltip).not.toBeVisible();
 
-  fireEvent.mouseEnter(attributionIcon);
-
-  // Tooltip should now be visible
-  const tooltipAfter = await screen.findByLabelText("attribution-tooltip");
-  expect(tooltipAfter).toBeVisible();
+  // eslint-disable-next-line testing-library/no-node-access
+  const iconHoverDiv = attributionIcon.querySelector("div");
+  fireEvent.mouseEnter(iconHoverDiv);
+  tooltip = await screen.findByLabelText("attribution-tooltip");
+  expect(tooltip).toBeVisible();
 
   // Check that the attribution text contains a link with the correct URL and text
-  const link = within(tooltipAfter).getByRole("link", {
+  const link = within(tooltip).getByRole("link", {
     name: "https://example.com",
   });
   expect(link).toBeInTheDocument();
   expect(link).toHaveAttribute("href", "https://example.com");
 
   // Optionally, check that the rest of the text is present
-  expect(tooltipAfter).toHaveTextContent("Some Attribution Text");
+  expect(tooltip).toHaveTextContent("Some Attribution Text");
 });
 
 test("Dashboard attribution and not show", async () => {
   const mockedDashboard = JSON.parse(JSON.stringify(userDashboard));
-  const gridItem = mockedDashboard.gridItems[0];
+  const gridItem = mockedDashboard.tabs[0].gridItems[0];
   gridItem.metadata_string = JSON.stringify({ attribution: false });
   gridItem.source = "plugin_source_checkbox";
   mockedConfirm.mockResolvedValue(true);
@@ -1467,13 +1620,17 @@ test("Dashboard attribution and not show", async () => {
     createLoadedComponent({
       children: (
         <>
-          <DashboardItem
-            gridItemSource={gridItem.source}
-            gridItemI={gridItem.i}
-            gridItemArgsString={gridItem.args_string}
-            gridItemMetadataString={gridItem.metadata_string}
-            gridItemIndex={0}
-          />
+          <GridItemContext.Provider
+            value={{
+              gridItemSource: gridItem.source,
+              gridItemI: gridItem.i,
+              gridItemMetadataString: gridItem.metadata_string,
+              gridItemArgsString: gridItem.args_string,
+              gridItemIndex: 0,
+            }}
+          >
+            <DashboardItem />
+          </GridItemContext.Provider>
           <EditingPComponent />
         </>
       ),
@@ -1481,14 +1638,14 @@ test("Dashboard attribution and not show", async () => {
         initialDashboard: userDashboard,
         visualizations: availableVisualizations,
       },
-    })
+    }),
   );
 
   const dashboardGridItem = await screen.findByLabelText("gridItemDiv");
   expect(dashboardGridItem).toBeInTheDocument();
 
   expect(
-    screen.queryByLabelText("attribution-info-icon")
+    screen.queryByLabelText("attribution-info-icon"),
   ).not.toBeInTheDocument();
 });
 
@@ -1667,7 +1824,10 @@ test("handleGridItemExport bad load", async () => {
 
   const response = await handleGridItemExport(gridItem);
 
-  expect(response).toStrictEqual(apiResponse);
+  expect(response).toStrictEqual({
+    success: false,
+    message: "Failed to fetch: some error",
+  });
 });
 
 test("handleGridItemImport", async () => {
@@ -1678,7 +1838,7 @@ test("handleGridItemImport", async () => {
     w: 20,
     h: 20,
     source: "",
-    args_string: {},
+    args_string: { test: 1 },
     metadata_string: {
       refreshRate: 0,
     },
@@ -1695,7 +1855,40 @@ test("handleGridItemImport", async () => {
       w: 20,
       h: 20,
       source: "",
-      args_string: "{}",
+      args_string: '{"test":1}',
+      metadata_string: JSON.stringify({
+        refreshRate: 0,
+      }),
+    },
+  });
+});
+
+test("handleGridItemImport string", async () => {
+  const gridItem = {
+    i: "1",
+    x: 0,
+    y: 0,
+    w: 20,
+    h: 20,
+    source: "",
+    args_string: JSON.stringify({ test: 1 }),
+    metadata_string: {
+      refreshRate: 0,
+    },
+  };
+
+  const response = await handleGridItemImport(gridItem, "123456789");
+
+  expect(response).toStrictEqual({
+    success: true,
+    importedGridItem: {
+      i: "1",
+      x: 0,
+      y: 0,
+      w: 20,
+      h: 20,
+      source: "",
+      args_string: '{"test":1}',
       metadata_string: JSON.stringify({
         refreshRate: 0,
       }),
@@ -1906,6 +2099,75 @@ test("handleGridItemImport with map geojson layer and no style", async () => {
     },
   });
   expect(mockUploadJSON).toHaveBeenCalledTimes(1);
+});
+
+test("handleGridItemImport with map geojson layer url", async () => {
+  const mockUploadJSON = jest.fn();
+  jest.spyOn(appAPI, "uploadJSON").mockImplementation(mockUploadJSON);
+
+  const gridItem = {
+    i: "1",
+    x: 0,
+    y: 0,
+    w: 20,
+    h: 20,
+    source: "Map",
+    args_string: {
+      layers: [
+        {
+          configuration: {
+            type: "VectorLayer",
+            props: {
+              name: "GeoJSON Layer",
+              source: {
+                type: "GeoJSON",
+                props: {},
+                geojson: "some/url/to/geojson.json",
+              },
+            },
+          },
+        },
+      ],
+    },
+    metadata_string: {
+      refreshRate: 0,
+    },
+  };
+
+  const response = await handleGridItemImport(gridItem, "123456789");
+
+  expect(response).toStrictEqual({
+    success: true,
+    importedGridItem: {
+      i: "1",
+      x: 0,
+      y: 0,
+      w: 20,
+      h: 20,
+      source: "Map",
+      args_string: JSON.stringify({
+        layers: [
+          {
+            configuration: {
+              type: "VectorLayer",
+              props: {
+                name: "GeoJSON Layer",
+                source: {
+                  type: "GeoJSON",
+                  props: {},
+                  geojson: "some/url/to/geojson.json",
+                },
+              },
+            },
+          },
+        ],
+      }),
+      metadata_string: JSON.stringify({
+        refreshRate: 0,
+      }),
+    },
+  });
+  expect(mockUploadJSON).toHaveBeenCalledTimes(0);
 });
 
 test("handleGridItemImport with map arcgis layer and no style", async () => {

@@ -10,11 +10,13 @@ import {
 import {
   nonDropDownVariableInputTypes,
   findSelectOptionByValue,
+  updateObjectWithVariableInputs,
 } from "components/visualizations/utilities";
 import TooltipButton from "components/buttons/TooltipButton";
 import { BsArrowClockwise } from "react-icons/bs";
 import Slider from "components/inputs/Slider";
-import { parseDateMath } from "components/inputs/DatePicker";
+import CSVUploader from "components/inputs/CSVUploader";
+import { valuesEqual } from "components/modals/utilities";
 
 const StyledDiv = styled.div`
   padding: 1rem;
@@ -32,11 +34,13 @@ const ButtonDiv = styled.div`
 const FlexDiv = styled.div`
   display: flex;
   width: 100%;
+  align-items: flex-end;
 `;
 
 const VariableInput = ({
   variable_name,
   initial_value,
+  show_label = true,
   variable_options_source,
   metadata,
   onChange,
@@ -44,35 +48,45 @@ const VariableInput = ({
   const [value, setValue] = useState("");
   const [type, setType] = useState(null);
   const [label, setLabel] = useState(null);
+  const [updatedMetadata, setUpdatedMetadata] = useState(metadata);
   const { visualizationArgs } = useContext(AppContext);
   const { inDataViewerMode } = useContext(DataViewerModeContext);
   const { variableInputValues, setVariableInputValues } = useContext(
-    VariableInputsContext
+    VariableInputsContext,
   );
+
+  // Initialize updatedMetadata when metadata or variableInputValues change
+  useEffect(() => {
+    if (metadata) {
+      const newUpdatedMetadata = updateObjectWithVariableInputs(
+        { ...metadata },
+        variableInputValues,
+      );
+      setUpdatedMetadata(newUpdatedMetadata);
+    }
+  }, [metadata, variableInputValues]);
 
   const updateVariableInputs = useCallback(
     (new_value) => {
       if (new_value || new_value === false || new_value === 0) {
-        if (["date", "date-hour"].includes(variable_options_source)) {
-          const parsedDate = parseDateMath({
-            value: new_value,
-            type: variable_options_source,
-          });
-          if (parsedDate) {
-            new_value = parsedDate;
+        setVariableInputValues((prevVariableInputValues) => {
+          let newVariableValues = { [variable_name]: new_value };
+          if (typeof new_value === "object") {
+            newVariableValues = { ...newVariableValues, ...new_value };
           }
-        }
-        setVariableInputValues((prevVariableInputValues) => ({
-          ...prevVariableInputValues,
-          [variable_name]: new_value,
-        }));
+          return {
+            ...prevVariableInputValues,
+            ...newVariableValues,
+          };
+        });
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [variable_name, setVariableInputValues]
+    [variable_name, setVariableInputValues],
   );
 
   useEffect(() => {
+    setLabel(variable_name);
     if (variable_options_source) {
       let initialVariableValue = initial_value;
       let variableValue = initialVariableValue;
@@ -82,7 +96,8 @@ const VariableInput = ({
         nonDropDownVariableInputTypes.some(
           (type) =>
             (typeof type === "string" && type === variable_options_source) ||
-            (typeof type === "object" && type.value === variable_options_source)
+            (typeof type === "object" &&
+              type.value === variable_options_source),
         ) ||
         Array.isArray(variable_options_source)
       ) {
@@ -91,11 +106,15 @@ const VariableInput = ({
         var selectedArg = visualizationArgs.find((obj) => {
           return obj.label === variable_options_source;
         });
-        setType(selectedArg.argOptions);
-        initialVariableValue = findSelectOptionByValue(
-          selectedArg.argOptions,
-          initialVariableValue
-        );
+        if (selectedArg) {
+          setType(selectedArg.argOptions);
+          initialVariableValue = findSelectOptionByValue(
+            selectedArg.argOptions,
+            initialVariableValue,
+          );
+        } else {
+          setType([]);
+        }
       }
 
       if (variable_options_source === "number") {
@@ -112,7 +131,6 @@ const VariableInput = ({
         variableValue = initialVariableValue;
       }
       setValue(initialVariableValue);
-      setLabel(variable_name);
 
       if (!inDataViewerMode) {
         updateVariableInputs(variableValue);
@@ -123,7 +141,7 @@ const VariableInput = ({
 
   useEffect(() => {
     let newValue = variableInputValues[variable_name];
-    if (Array.isArray(type)) {
+    if (Array.isArray(type) && type.length > 0) {
       newValue = findSelectOptionByValue(type, newValue);
     }
     if (newValue && value !== newValue) {
@@ -141,7 +159,12 @@ const VariableInput = ({
       setValue(inputValue);
       onChange(inputValue);
 
-      if (Array.isArray(type) || type === "checkbox" || type === "slider") {
+      if (
+        Array.isArray(type) ||
+        type === "checkbox" ||
+        type === "slider" ||
+        type === "csv-uploader"
+      ) {
         if (!inDataViewerMode) {
           updateVariableInputs(e.value ?? e);
         }
@@ -153,7 +176,7 @@ const VariableInput = ({
       type,
       inDataViewerMode,
       updateVariableInputs,
-    ]
+    ],
   );
 
   function handleInputRefresh() {
@@ -166,7 +189,7 @@ const VariableInput = ({
     return (
       <StyledDiv>
         <DataInput
-          label={label}
+          label={show_label ? label : ""}
           type={type}
           value={value}
           onChange={handleInputChange}
@@ -174,38 +197,92 @@ const VariableInput = ({
       </StyledDiv>
     );
   } else if (type === "slider") {
-    const requiredKeys = ["step", "min", "max", "initialValue", "dataType"];
-
-    if (!metadata || requiredKeys.some((key) => metadata?.[key] == null)) {
+    // initialValue or initialRange must be present, rest are required
+    const alwaysRequiredKeys = ["step", "min", "max", "dataType"];
+    const hasInitialValue = updatedMetadata?.initialValue != null;
+    const hasInitialRange = updatedMetadata?.initialRange != null;
+    const missingKeys = [];
+    if (!updatedMetadata) {
+      missingKeys.push(...alwaysRequiredKeys, "initialValue or initialRange");
+    } else {
+      alwaysRequiredKeys.forEach((key) => {
+        if (updatedMetadata[key] == null) missingKeys.push(key);
+      });
+      if (!hasInitialValue && !hasInitialRange) {
+        missingKeys.push("initialValue or initialRange");
+      }
+    }
+    if (missingKeys.length > 0) {
       return <div data-testid="slider-missing-metadata" />;
     }
 
     return (
       <StyledDiv>
         <Slider
-          label={label}
-          step={metadata.step}
-          min={metadata.min}
-          max={metadata.max}
-          initialValue={metadata.initialValue}
-          initialRange={metadata.initialRange}
-          rangeMode={metadata.rangeMode}
-          outputFormat={metadata.outputFormat}
-          dataType={metadata.dataType}
-          dateTimeDelta={metadata?.dateTimeDelta}
+          label={show_label ? label : ""}
+          step={updatedMetadata.step}
+          min={updatedMetadata.min}
+          max={updatedMetadata.max}
+          initialValue={updatedMetadata.initialValue}
+          initialRange={updatedMetadata.initialRange}
+          rangeMode={updatedMetadata.rangeMode}
+          outputFormat={updatedMetadata.outputFormat}
+          dataType={updatedMetadata.dataType}
+          dateTimeDelta={updatedMetadata?.dateTimeDelta}
+          speeds={
+            Array.isArray(updatedMetadata?.speedOptions)
+              ? updatedMetadata.speedOptions.map((v) => {
+                  // Map value to label
+                  if (v === 2000) return { label: "Extra Slow", value: 2000 };
+                  if (v === 1000) return { label: "Slow", value: 1000 };
+                  if (v === 500) return { label: "Medium", value: 500 };
+                  if (v === 250) return { label: "Fast", value: 250 };
+                  if (v === 100) return { label: "Extra Fast", value: 100 };
+                  return { label: `${v}ms`, value: v };
+                })
+              : undefined
+          }
           onChange={handleInputChange}
         />
+      </StyledDiv>
+    );
+  } else if (type === "csv-uploader") {
+    const requiredKeys = ["headers"];
+    const missingKeys = requiredKeys.filter((key) => metadata?.[key] == null);
+
+    if (!metadata || missingKeys.length > 0) {
+      return (
+        <div data-testid="csvuploader-missing-metadata">
+          Missing required metadata: {missingKeys}
+        </div>
+      );
+    }
+    return (
+      <StyledDiv>
+        {show_label && (
+          <label>
+            <b>{label}</b>:
+          </label>
+        )}
+        <CSVUploader headers={metadata.headers} onChange={handleInputChange} />
       </StyledDiv>
     );
   } else {
     return (
       <StyledDiv>
-        <label>
-          <b>{label}</b>:
-        </label>
+        {type !== "date-range" && show_label && (
+          <label>
+            <b>{label}</b>:
+          </label>
+        )}
         <FlexDiv>
           <InputDiv>
-            <DataInput type={type} value={value} onChange={handleInputChange} />
+            <DataInput
+              type={type}
+              value={value}
+              onChange={handleInputChange}
+              inputProps={updatedMetadata}
+            />
           </InputDiv>
           <ButtonDiv>
             <TooltipButton
@@ -231,30 +308,55 @@ VariableInput.propTypes = {
     PropTypes.bool,
     PropTypes.number,
   ]),
+  show_label: PropTypes.bool,
   variable_name: PropTypes.string,
-  variable_options_source: PropTypes.string, // This is where the name of the source comes in like in the dropdown
+  variable_options_source: PropTypes.oneOfType([
+    PropTypes.string,
+    PropTypes.arrayOf(
+      PropTypes.oneOfType([
+        PropTypes.string,
+        PropTypes.shape({ label: PropTypes.string, value: PropTypes.any }),
+      ]),
+    ),
+  ]), // This is where the name of the source comes in like in the dropdown
   onChange: PropTypes.func,
   metadata: PropTypes.shape({
     min: PropTypes.oneOfType([
       PropTypes.number,
       PropTypes.string,
       PropTypes.instanceOf(Date),
-    ]),
+    ]), // For slider metadata
     max: PropTypes.oneOfType([
       PropTypes.number,
       PropTypes.string,
       PropTypes.instanceOf(Date),
-    ]),
-    step: PropTypes.number,
-    dataType: PropTypes.string,
-    initialValue: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    ]), // For slider metadata
+    step: PropTypes.number, // For slider metadata
+    dataType: PropTypes.string, // For slider metadata
+    initialValue: PropTypes.oneOfType([PropTypes.string, PropTypes.number]), // For slider metadata
     initialRange: PropTypes.arrayOf(
-      PropTypes.oneOfType([PropTypes.number, PropTypes.string])
-    ),
-    rangeMode: PropTypes.string,
-    outputFormat: PropTypes.string,
+      PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+    ), // For slider metadata
+    rangeMode: PropTypes.bool, // For slider metadata
+    outputFormat: PropTypes.string, // For slider metadata
     dateTimeDelta: PropTypes.string, // For slider metadata
+    headers: PropTypes.arrayOf(PropTypes.string), // For CSVUploader metadata
   }),
 };
 
-export default memo(VariableInput);
+// Custom comparison that ignores context changes that don't affect VariableInput
+const arePropsEqual = (prevProps, nextProps) => {
+  // Only check the props that actually affect VariableInput rendering
+  const relevantKeys = [
+    "variable_name",
+    "show_label",
+    "initial_value",
+    "variable_options_source",
+    "metadata",
+  ];
+  return relevantKeys.every((key) =>
+    valuesEqual(prevProps[key], nextProps[key]),
+  );
+};
+
+export default memo(VariableInput, arePropsEqual);

@@ -5,6 +5,7 @@ import selectEvent from "react-select-event";
 import appAPI from "services/api/app";
 import PropTypes from "prop-types";
 import userEvent from "@testing-library/user-event";
+import { LayoutContext } from "components/contexts/Contexts";
 
 const exampleGeoJSON = {
   type: "FeatureCollection",
@@ -37,7 +38,7 @@ const TestingComponent = ({ initialSourceProps, setErrorMessage }) => {
   });
 
   return (
-    <>
+    <LayoutContext.Provider value={{ uuid: "123" }}>
       <SourcePane
         sourceProps={sourceProps}
         setSourceProps={setSourceProps}
@@ -51,7 +52,7 @@ const TestingComponent = ({ initialSourceProps, setErrorMessage }) => {
       <p data-testid="omittedPopupAttributes">
         {JSON.stringify(attributeProps.omitted)}
       </p>
-    </>
+    </LayoutContext.Provider>
   );
 };
 
@@ -60,17 +61,17 @@ test("SourcePane ImageArcGISRest", async () => {
 
   expect(await screen.findByText("Source Type")).toBeInTheDocument();
   expect(await screen.findByTestId("sourceProps")).toHaveTextContent(
-    JSON.stringify({})
+    JSON.stringify({}),
   );
   expect(await screen.findByTestId("attributeVariables")).toHaveTextContent(
     JSON.stringify({
       someLayer: { someField: "someVariable" },
-    })
+    }),
   );
   expect(await screen.findByTestId("omittedPopupAttributes")).toHaveTextContent(
     JSON.stringify({
       someLayer: ["someField"],
-    })
+    }),
   );
   const sourceDropdown = screen.getByRole("combobox");
 
@@ -79,7 +80,7 @@ test("SourcePane ImageArcGISRest", async () => {
   fireEvent.click(sourceOption);
   expect(await screen.findByText("Source Properties")).toBeInTheDocument();
   expect(await screen.findByTestId("sourceProps")).toHaveTextContent(
-    JSON.stringify({ type: "ESRI Image and Map Service", props: {} })
+    JSON.stringify({ type: "ESRI Image and Map Service", props: {} }),
   );
 
   expect(screen.getByText("*url")).toBeInTheDocument();
@@ -100,12 +101,12 @@ test("SourcePane ImageArcGISRest", async () => {
     JSON.stringify({
       type: "ESRI Image and Map Service",
       props: { url: "Some Url" },
-    })
+    }),
   );
 
   const layerdefsInput = inputs[4];
   expect(layerdefsInput.placeholder).toBe(
-    "Allows you to filter the features of individual layers"
+    "Allows you to filter the features of individual layers",
   );
   fireEvent.change(layerdefsInput, {
     target: { value: "Some layerDef" },
@@ -114,7 +115,7 @@ test("SourcePane ImageArcGISRest", async () => {
     JSON.stringify({
       type: "ESRI Image and Map Service",
       props: { url: "Some Url", params: { LAYERDEFS: "Some layerDef" } },
-    })
+    }),
   );
 
   selectEvent.openMenu(sourceDropdown);
@@ -124,21 +125,21 @@ test("SourcePane ImageArcGISRest", async () => {
     JSON.stringify({
       type: "WMS",
       props: { url: "Some Url" },
-    })
+    }),
   );
 });
 
-test("SourcePane GeoJson Input", async () => {
+test("SourcePane GeoJson then switch type", async () => {
   render(<TestingComponent />);
 
   expect(await screen.findByText("Source Type")).toBeInTheDocument();
   expect(await screen.findByTestId("sourceProps")).toHaveTextContent(
-    JSON.stringify({})
+    JSON.stringify({}),
   );
   const sourceDropdown = screen.getByRole("combobox");
 
   selectEvent.openMenu(sourceDropdown);
-  const sourceOption = await screen.findByText("GeoJSON");
+  let sourceOption = await screen.findByText("GeoJSON");
   fireEvent.click(sourceOption);
 
   expect(await screen.findByText("Upload GeoJSON file")).toBeInTheDocument();
@@ -152,7 +153,18 @@ test("SourcePane GeoJson Input", async () => {
       type: "GeoJSON",
       props: {},
       geojson: JSON.stringify(exampleGeoJSON),
-    })
+    }),
+  );
+
+  selectEvent.openMenu(sourceDropdown);
+  sourceOption = await screen.findByText("ESRI Feature Service");
+  fireEvent.click(sourceOption);
+
+  expect(await screen.findByTestId("sourceProps")).toHaveTextContent(
+    JSON.stringify({
+      type: "ESRI Feature Service",
+      props: {},
+    }),
   );
 });
 
@@ -166,7 +178,7 @@ test("SourcePane GeoJson URL", async () => {
 
   expect(await screen.findByText("Source Type")).toBeInTheDocument();
   expect(await screen.findByTestId("sourceProps")).toHaveTextContent(
-    JSON.stringify({})
+    JSON.stringify({}),
   );
   const sourceDropdown = screen.getByRole("combobox");
 
@@ -188,7 +200,7 @@ test("SourcePane GeoJson URL", async () => {
       type: "GeoJSON",
       props: {},
       geojson: "some/url/file.json",
-    })
+    }),
   );
   await waitFor(() => {
     expect(mockSetErrorMessage).toHaveBeenCalledTimes(0);
@@ -201,7 +213,7 @@ test("SourcePane GeoJson URL", async () => {
       type: "GeoJSON",
       props: {},
       geojson: "{}",
-    })
+    }),
   );
 });
 
@@ -215,7 +227,7 @@ test("SourcePane GeoJson bad URL", async () => {
 
   expect(await screen.findByText("Source Type")).toBeInTheDocument();
   expect(await screen.findByTestId("sourceProps")).toHaveTextContent(
-    JSON.stringify({})
+    JSON.stringify({}),
   );
   const sourceDropdown = screen.getByRole("combobox");
 
@@ -237,7 +249,7 @@ test("SourcePane GeoJson bad URL", async () => {
       type: "GeoJSON",
       props: {},
       geojson: "some/url/file.json",
-    })
+    }),
   );
   await waitFor(() => {
     expect(mockSetErrorMessage).toHaveBeenCalledWith("Failed to retrieve JSON");
@@ -249,7 +261,7 @@ test("SourcePane GeoJson File Upload", async () => {
 
   expect(await screen.findByText("Source Type")).toBeInTheDocument();
   expect(await screen.findByTestId("sourceProps")).toHaveTextContent(
-    JSON.stringify({})
+    JSON.stringify({}),
   );
   const sourceDropdown = screen.getByRole("combobox");
 
@@ -271,7 +283,7 @@ test("SourcePane GeoJson File Upload", async () => {
         type: "GeoJSON",
         props: {},
         geojson: JSON.stringify(exampleGeoJSON),
-      })
+      }),
     );
   });
 });
@@ -288,7 +300,7 @@ test("SourcePane Updating Existing GeoJSON file", async () => {
         props: {},
         geojson: "some_file.json",
       }}
-    />
+    />,
   );
 
   expect(await screen.findByText("Source Type")).toBeInTheDocument();
@@ -297,7 +309,7 @@ test("SourcePane Updating Existing GeoJSON file", async () => {
       type: "GeoJSON",
       props: {},
       geojson: "some_file.json",
-    })
+    }),
   );
   expect(await screen.findByText("Upload GeoJSON file")).toBeInTheDocument();
   await waitFor(async () => {
@@ -306,7 +318,7 @@ test("SourcePane Updating Existing GeoJSON file", async () => {
         type: "GeoJSON",
         props: {},
         geojson: JSON.stringify(exampleGeoJSON),
-      })
+      }),
     );
   });
 });
@@ -323,12 +335,12 @@ test("SourcePane Updating Existing GeoJSON url", async () => {
         props: {},
         geojson: "some/url/some_file.json",
       }}
-    />
+    />,
   );
 
   expect(await screen.findByText("Source Type")).toBeInTheDocument();
   expect(await screen.findByTestId("sourceProps")).toHaveTextContent(
-    JSON.stringify({})
+    JSON.stringify({}),
   );
 
   expect(await screen.findByText("GeoJSON Source")).toBeInTheDocument();
@@ -337,7 +349,7 @@ test("SourcePane Updating Existing GeoJSON url", async () => {
       type: "GeoJSON",
       props: {},
       geojson: "some/url/some_file.json",
-    })
+    }),
   );
 });
 
@@ -353,7 +365,7 @@ test("SourcePane Updating Existing GeoJSON object", async () => {
         props: {},
         geojson: exampleGeoJSON,
       }}
-    />
+    />,
   );
 
   expect(await screen.findByText("Source Type")).toBeInTheDocument();
@@ -362,7 +374,7 @@ test("SourcePane Updating Existing GeoJSON object", async () => {
       type: "GeoJSON",
       props: {},
       geojson: JSON.stringify(exampleGeoJSON),
-    })
+    }),
   );
 });
 
@@ -380,7 +392,7 @@ test("SourcePane Updating Error Downloading GeoJSON", async () => {
         geojson: "some_file.json",
       }}
       setErrorMessage={mockSetErrorMessage}
-    />
+    />,
   );
 
   expect(await screen.findByText("Source Type")).toBeInTheDocument();
@@ -389,7 +401,7 @@ test("SourcePane Updating Error Downloading GeoJSON", async () => {
       type: "GeoJSON",
       props: {},
       geojson: "some_file.json",
-    })
+    }),
   );
   expect(await screen.findByText("Upload GeoJSON file")).toBeInTheDocument();
   expect(mockSetErrorMessage).toHaveBeenCalledWith("Failed to retrieve JSON");
@@ -408,7 +420,7 @@ test("SourcePane Updating Existing VectorTiles", async () => {
           urls: ["some_url", "some_other_url"],
         },
       }}
-    />
+    />,
   );
 
   expect(await screen.findByText("Source Type")).toBeInTheDocument();
@@ -418,7 +430,7 @@ test("SourcePane Updating Existing VectorTiles", async () => {
       props: {
         urls: ["some_url", "some_other_url"],
       },
-    })
+    }),
   );
 
   expect(screen.getByText("*urls")).toBeInTheDocument();
@@ -428,7 +440,7 @@ test("SourcePane Updating Existing VectorTiles", async () => {
   const inputs = screen.getAllByRole("textbox");
   const urlsInput = inputs[0];
   expect(urlsInput.placeholder).toBe(
-    "An comma separated list of URL templates. Must include {x}, {y} or {-y}, and {z} placeholders. A {?-?} template pattern, for example subdomain{a-f}.domain.com, may be used instead of defining each one separately in the urls option."
+    "An comma separated list of URL templates. Must include {x}, {y} or {-y}, and {z} placeholders. A {?-?} template pattern, for example subdomain{a-f}.domain.com, may be used instead of defining each one separately in the urls option.",
   );
   expect(urlsInput.value).toBe("some_url,some_other_url");
 });

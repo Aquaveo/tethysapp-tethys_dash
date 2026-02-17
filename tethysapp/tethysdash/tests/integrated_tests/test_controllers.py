@@ -1,7 +1,7 @@
 import pytest
 import json
 from django.urls import reverse
-from tethysapp.tethysdash.model import Dashboard
+from tethysapp.tethysdash.model import Dashboard, Message, create_partition_for_date
 from unittest.mock import MagicMock
 import os
 import shutil
@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 import types
 from tethysapp.tethysdash.exceptions import VisualizationError
 import uuid
+from tethysapp.tethysdash.controllers import VisualizationConsumer
+from channels.layers import get_channel_layer
 
 
 @pytest.mark.django_db
@@ -37,10 +39,12 @@ def test_data_failed(client, mock_app, mocker):
     url = reverse("tethysdash:visualization")
     mock_gv = mocker.patch("tethysapp.tethysdash.controllers.get_visualization")
     mock_gv.side_effect = [Exception("Failed data retrieval")]
+    requestId = str(uuid.uuid4())
 
     itemData = {
         "source": "usace_time_series",
         "args": json.dumps({"location": "CREC1", "year": 2025}),
+        "requestId": requestId,
     }
 
     response = client.get(url, itemData)
@@ -58,10 +62,12 @@ def test_data_failed_custom_error(client, mock_app, mocker):
     url = reverse("tethysdash:visualization")
     mock_gv = mocker.patch("tethysapp.tethysdash.controllers.get_visualization")
     mock_gv.side_effect = [VisualizationError("some custom error message")]
+    requestId = str(uuid.uuid4())
 
     itemData = {
         "source": "usace_time_series",
         "args": json.dumps({"location": "CREC1", "year": 2025}),
+        "requestId": requestId,
     }
 
     response = client.get(url, itemData)
@@ -80,10 +86,12 @@ def test_data(client, mock_app, mocker):
     mock_gv = mocker.patch("tethysapp.tethysdash.controllers.get_visualization")
     plot_data = {"data": [], "layout": {}}
     mock_gv.return_value = ["plotly", plot_data]
+    requestId = str(uuid.uuid4())
 
     itemData = {
         "source": "usace_time_series",
         "args": json.dumps({"location": "CREC1", "year": 2025}),
+        "requestId": requestId,
     }
 
     response = client.get(url, itemData)
@@ -127,7 +135,7 @@ def test_dashboards(
     tmp_path,
     permission_group,
 ):
-    mock_app("tethysapp.tethysdash.controllers.App")
+    mocked_app = mock_app("tethysapp.tethysdash.controllers.App")
     mock_app_get_ps_db("tethysapp.tethysdash.model.App")
     app_media_path = tmp_path
     workspace_path = tmp_path
@@ -139,6 +147,7 @@ def test_dashboards(
         "tethysapp.tethysdash.model.get_app_workspace"
     )
     mock_get_app_workspace.return_value = MagicMock(path=workspace_path)
+    mocked_app.get_custom_setting.side_effect = ["", ""]
 
     url = reverse("tethysdash:dashboards")
     client.force_login(test_owner_user)
@@ -163,6 +172,111 @@ def test_dashboards(
         {"permission": "viewer", "group": permission_group["name"]},
     ]
     assert len(response_json["permission_groups"]) == 1
+    assert "support_info" not in response_json
+
+
+@pytest.mark.django_db
+def test_dashboards_with_support_email(
+    client,
+    test_owner_user,
+    mock_app,
+    mock_app_get_ps_db,
+    mocker,
+    tmp_path,
+):
+    mocked_app = mock_app("tethysapp.tethysdash.controllers.App")
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    app_media_path = tmp_path
+    workspace_path = tmp_path
+    mock_get_app_media = mocker.patch("tethysapp.tethysdash.model.get_app_media")
+    mock_get_app_media.return_value = MagicMock(path=app_media_path)
+    mock_get_app_media2 = mocker.patch("tethys_apps.base.paths.get_app_media")
+    mock_get_app_media2.return_value = MagicMock(path=app_media_path)
+    mock_get_app_workspace = mocker.patch(
+        "tethysapp.tethysdash.model.get_app_workspace"
+    )
+    mock_get_app_workspace.return_value = MagicMock(path=workspace_path)
+    mocked_app.get_custom_setting.side_effect = ["support@example.com", ""]
+
+    url = reverse("tethysdash:dashboards")
+    client.force_login(test_owner_user)
+    response = client.get(url)
+
+    assert response.status_code == 200
+    response_json = response.json()
+    assert response_json["support_info"] == {"support_email": "support@example.com"}
+
+
+@pytest.mark.django_db
+def test_dashboards_with_support_github(
+    client,
+    test_owner_user,
+    mock_app,
+    mock_app_get_ps_db,
+    mocker,
+    tmp_path,
+):
+    mocked_app = mock_app("tethysapp.tethysdash.controllers.App")
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    app_media_path = tmp_path
+    workspace_path = tmp_path
+    mock_get_app_media = mocker.patch("tethysapp.tethysdash.model.get_app_media")
+    mock_get_app_media.return_value = MagicMock(path=app_media_path)
+    mock_get_app_media2 = mocker.patch("tethys_apps.base.paths.get_app_media")
+    mock_get_app_media2.return_value = MagicMock(path=app_media_path)
+    mock_get_app_workspace = mocker.patch(
+        "tethysapp.tethysdash.model.get_app_workspace"
+    )
+    mock_get_app_workspace.return_value = MagicMock(path=workspace_path)
+    mocked_app.get_custom_setting.side_effect = ["", "https://github.com/support"]
+
+    url = reverse("tethysdash:dashboards")
+    client.force_login(test_owner_user)
+    response = client.get(url)
+
+    assert response.status_code == 200
+    response_json = response.json()
+    assert response_json["support_info"] == {
+        "support_github": "https://github.com/support"
+    }
+
+
+@pytest.mark.django_db
+def test_dashboards_with_support_email_and_github(
+    client,
+    test_owner_user,
+    mock_app,
+    mock_app_get_ps_db,
+    mocker,
+    tmp_path,
+):
+    mocked_app = mock_app("tethysapp.tethysdash.controllers.App")
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    app_media_path = tmp_path
+    workspace_path = tmp_path
+    mock_get_app_media = mocker.patch("tethysapp.tethysdash.model.get_app_media")
+    mock_get_app_media.return_value = MagicMock(path=app_media_path)
+    mock_get_app_media2 = mocker.patch("tethys_apps.base.paths.get_app_media")
+    mock_get_app_media2.return_value = MagicMock(path=app_media_path)
+    mock_get_app_workspace = mocker.patch(
+        "tethysapp.tethysdash.model.get_app_workspace"
+    )
+    mock_get_app_workspace.return_value = MagicMock(path=workspace_path)
+    mocked_app.get_custom_setting.side_effect = [
+        "support@example.com",
+        "https://github.com/support",
+    ]
+
+    url = reverse("tethysdash:dashboards")
+    client.force_login(test_owner_user)
+    response = client.get(url)
+
+    assert response.status_code == 200
+    response_json = response.json()
+    assert response_json["support_info"] == {
+        "support_email": "support@example.com",
+        "support_github": "https://github.com/support",
+    }
 
 
 @pytest.mark.django_db
@@ -195,10 +309,10 @@ def test_get_dashboard(
             "description": dashboard.description,
             "id": dashboard.id,
             "name": dashboard.name,
-            "gridItems": [],
+            "tabs": [],
             "uuid": dashboard.uuid,
             "notes": "some notes",
-            "image": "/static/tethysdash/images/dashboard_thumbnail.png",
+            "image": "/static/tethysdash/images/default_dashboard.png",
             "unrestrictedPlacement": dashboard.unrestricted_placement,
             "owner": dashboard.owner,
             "permissions": [
@@ -304,7 +418,7 @@ def test_add_dashboard(
         "description": "description",
         "id": new_dashboard["id"],
         "name": "some_new_dashboard_name",
-        "image": "/media/app_root/app/123e4567-e89b-12d3-a456-426614174000.png",
+        "image": "/media/tethysdash/app/123e4567-e89b-12d3-a456-426614174000.png",
         "uuid": "123e4567-e89b-12d3-a456-426614174000",
         "unrestrictedPlacement": False,
         "owner": test_admin_user.username,
@@ -350,6 +464,7 @@ def test_add_dashboard_failed(client, admin_user, mock_app, mocker, tmp_path):
         False,
         False,
         [],
+        [],
     )
     assert response.status_code == 200
     assert response.json()["success"] is False
@@ -387,6 +502,7 @@ def test_add_dashboard_failed_unknown_exception(
         "",
         False,
         False,
+        [],
         [],
     )
     assert response.status_code == 200
@@ -559,11 +675,11 @@ def test_update_dashboard(
     response = client.generic("POST", url, json.dumps(itemData))
     expected_dashboard = {
         "description": dashboard.description,
-        "gridItems": dashboard.grid_items,
+        "tabs": dashboard.tabs,
         "id": dashboard.id,
         "name": "new_dashboard_name",
         "notes": dashboard.notes,
-        "image": "/static/tethysdash/images/dashboard_thumbnail.png",
+        "image": "/static/tethysdash/images/default_dashboard.png",
         "uuid": "some_user_dashboard_uuid",
         "unrestrictedPlacement": dashboard.unrestricted_placement,
         "owner": dashboard.owner,
@@ -710,7 +826,7 @@ def test_copy_dashboard(
         "description": dashboard.description,
         "id": new_dashboard["id"],
         "name": "some_new_dashboard_name",
-        "image": "/static/tethysdash/images/dashboard_thumbnail.png",
+        "image": "/static/tethysdash/images/default_dashboard.png",
         "uuid": dashboard_uuid,
         "unrestrictedPlacement": dashboard.unrestricted_placement,
         "owner": admin_user.username,
@@ -772,7 +888,7 @@ def test_copy_dashboard_with_thumbnail(
         "description": dashboard.description,
         "id": new_dashboard["id"],
         "name": "some_new_dashboard_name",
-        "image": "/media/app_root/app/123e4567-e89b-12d3-a456-426614174001.png",
+        "image": "/media/tethysdash/app/123e4567-e89b-12d3-a456-426614174001.png",
         "uuid": "123e4567-e89b-12d3-a456-426614174001",
         "unrestrictedPlacement": dashboard.unrestricted_placement,
         "owner": admin_user.username,
@@ -882,13 +998,7 @@ def test_copy_dashboard_failed_unknown_exception(
 
 
 @pytest.mark.django_db
-def test_upload_json(
-    client,
-    admin_user,
-    mock_app,
-    mocker,
-    tmp_path,
-):
+def test_upload_json(client, admin_user, mock_app, mocker, tmp_path, dashboard_data):
     mock_app("tethysapp.tethysdash.app.App")
     mock_get_app_workspace = mocker.patch("tethys_apps.base.paths.get_app_workspace")
     workspace_path = tmp_path
@@ -897,6 +1007,7 @@ def test_upload_json(
     itemData = {
         "data": json.dumps({"some": "data"}),
         "filename": "some_filename.json",
+        "dashboard_uuid": dashboard_data["uuid"],
     }
 
     url = reverse("tethysdash:upload_json")
@@ -904,22 +1015,17 @@ def test_upload_json(
 
     response = client.generic("POST", url, json.dumps(itemData))
 
+    assert os.path.exists(
+        os.path.join(workspace_path, dashboard_data["uuid"], itemData["filename"])
+    )
+
     assert response.status_code == 200
     assert response.json()["success"]
-
-    assert os.path.exists(
-        os.path.join(workspace_path, "json", "admin", itemData["filename"])
-    )
-    assert os.path.exists(os.path.join(workspace_path, "json", itemData["filename"]))
 
 
 @pytest.mark.django_db
 def test_upload_json_failed(
-    client,
-    admin_user,
-    mock_app,
-    mocker,
-    tmp_path,
+    client, admin_user, mock_app, mocker, tmp_path, dashboard_data
 ):
     mock_app("tethysapp.tethysdash.app.App")
     mock_get_app_workspace = mocker.patch("tethys_apps.base.paths.get_app_workspace")
@@ -931,6 +1037,7 @@ def test_upload_json_failed(
     itemData = {
         "data": json.dumps({"some": "data"}),
         "filename": "some_filename.json",
+        "dashboard_uuid": dashboard_data["uuid"],
     }
 
     url = reverse("tethysdash:upload_json")
@@ -945,11 +1052,7 @@ def test_upload_json_failed(
 
 @pytest.mark.django_db
 def test_upload_json_failed_unknown_exception(
-    client,
-    admin_user,
-    mock_app,
-    mocker,
-    tmp_path,
+    client, admin_user, mock_app, mocker, tmp_path, dashboard_data
 ):
     mock_app("tethysapp.tethysdash.app.App")
     mock_get_app_workspace = mocker.patch("tethys_apps.base.paths.get_app_workspace")
@@ -961,6 +1064,7 @@ def test_upload_json_failed_unknown_exception(
     itemData = {
         "data": json.dumps({"some": "data"}),
         "filename": "some_filename.json",
+        "dashboard_uuid": dashboard_data["uuid"],
     }
 
     url = reverse("tethysdash:upload_json")
@@ -977,13 +1081,7 @@ def test_upload_json_failed_unknown_exception(
 
 
 @pytest.mark.django_db
-def test_download_json(
-    client,
-    admin_user,
-    mock_app,
-    mocker,
-    tmp_path,
-):
+def test_download_json(client, admin_user, mock_app, mocker, tmp_path, dashboard_data):
     mock_app("tethysapp.tethysdash.app.App")
     mock_get_app_workspace = mocker.patch("tethys_apps.base.paths.get_app_workspace")
     workspace_path = tmp_path
@@ -991,15 +1089,16 @@ def test_download_json(
 
     itemData = {
         "filename": "some_filename.json",
+        "dashboard_uuid": dashboard_data["uuid"],
     }
 
-    os.makedirs(os.path.join(workspace_path, "json"), exist_ok=True)
+    os.makedirs(os.path.join(workspace_path, dashboard_data["uuid"]), exist_ok=True)
     shutil.copyfile(
         os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "files/valid_geojson.geojson",
         ),
-        os.path.join(workspace_path, "json", itemData["filename"]),
+        os.path.join(workspace_path, dashboard_data["uuid"], itemData["filename"]),
     )
 
     url = reverse("tethysdash:download_json")
@@ -1020,11 +1119,7 @@ def test_download_json(
 
 @pytest.mark.django_db
 def test_download_json_failed(
-    client,
-    admin_user,
-    mock_app,
-    mocker,
-    tmp_path,
+    client, admin_user, mock_app, mocker, tmp_path, dashboard_data
 ):
     mock_app("tethysapp.tethysdash.app.App")
     mock_get_app_workspace = mocker.patch("tethys_apps.base.paths.get_app_workspace")
@@ -1033,15 +1128,16 @@ def test_download_json_failed(
 
     itemData = {
         "filename": "some_filename.json",
+        "dashboard_uuid": dashboard_data["uuid"],
     }
 
-    os.makedirs(os.path.join(workspace_path, "json"), exist_ok=True)
+    os.makedirs(os.path.join(workspace_path, dashboard_data["uuid"]), exist_ok=True)
     shutil.copyfile(
         os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "files/valid_geojson.geojson",
         ),
-        os.path.join(workspace_path, "json", itemData["filename"]),
+        os.path.join(workspace_path, dashboard_data["uuid"], itemData["filename"]),
     )
 
     url = reverse("tethysdash:download_json")
@@ -1058,11 +1154,7 @@ def test_download_json_failed(
 
 @pytest.mark.django_db
 def test_download_json_failed_unknown_exception(
-    client,
-    admin_user,
-    mock_app,
-    mocker,
-    tmp_path,
+    client, admin_user, mock_app, mocker, tmp_path, dashboard_data
 ):
     mock_app("tethysapp.tethysdash.app.App")
     mock_get_app_workspace = mocker.patch("tethys_apps.base.paths.get_app_workspace")
@@ -1071,15 +1163,16 @@ def test_download_json_failed_unknown_exception(
 
     itemData = {
         "filename": "some_filename.json",
+        "dashboard_uuid": dashboard_data["uuid"],
     }
 
-    os.makedirs(os.path.join(workspace_path, "json"), exist_ok=True)
+    os.makedirs(os.path.join(workspace_path, dashboard_data["uuid"]), exist_ok=True)
     shutil.copyfile(
         os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "files/valid_geojson.geojson",
         ),
-        os.path.join(workspace_path, "json", itemData["filename"]),
+        os.path.join(workspace_path, dashboard_data["uuid"], itemData["filename"]),
     )
 
     url = reverse("tethysdash:download_json")
@@ -1641,6 +1734,569 @@ def test_visualization_permissions_no_permission(client, admin_user, mock_app, m
         == "User doesn't have permission to view visualization permissions."
     )
     mock_get_visualization_permissions.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_visualization_consumer_connect_authenticated(settings):
+    """Test that an authenticated user can connect and is added to the group."""
+
+    # Patch the user to be authenticated
+    class DummyUser:
+        is_authenticated = True
+
+    application = VisualizationConsumer()
+    scope = {"user": DummyUser(), "type": "websocket", "path": "/ws/"}
+    application.scope = scope
+    application.channel_layer = get_channel_layer()
+    application.channel_name = "test_channel"
+
+    # Patch group_add and accept to track calls
+    called = {}
+
+    async def fake_group_add(group, channel):
+        called["group_add"] = (group, channel)
+
+    async def fake_accept():
+        called["accept"] = True
+
+    application.channel_layer.group_add = fake_group_add
+    application.accept = fake_accept
+
+    await application.connect()
+    assert called["group_add"] == ("dashboard_updates", "test_channel")
+    assert called["accept"] is True
+
+
+@pytest.mark.asyncio
+async def test_visualization_consumer_connect_unauthenticated():
+    """Test that an unauthenticated user can connect and is added to the group.."""
+
+    class DummyUser:
+        is_authenticated = False
+
+    application = VisualizationConsumer()
+    scope = {"user": DummyUser(), "type": "websocket", "path": "/ws/"}
+    application.scope = scope
+    application.channel_layer = get_channel_layer()
+    application.channel_name = "test_channel"
+
+    # Patch group_add and accept to track calls
+    called = {}
+
+    async def fake_group_add(group, channel):
+        called["group_add"] = (group, channel)
+
+    async def fake_accept():
+        called["accept"] = True
+
+    application.channel_layer.group_add = fake_group_add
+    application.accept = fake_accept
+
+    await application.connect()
+    assert called["group_add"] == ("dashboard_updates", "test_channel")
+    assert called["accept"] is True
+
+
+@pytest.mark.asyncio
+async def test_visualization_consumer_disconnect():
+    """Test that disconnect removes the channel from the group."""
+    application = VisualizationConsumer()
+    application.scope = {"user": type("User", (), {"is_authenticated": True})()}
+    application.channel_layer = get_channel_layer()
+    application.channel_name = "test_channel"
+    called = {}
+
+    async def fake_group_discard(group, channel):
+        called["group_discard"] = (group, channel)
+
+    application.channel_layer.group_discard = fake_group_discard
+    await application.disconnect(1000)
+    assert called["group_discard"] == ("dashboard_updates", "test_channel")
+
+
+@pytest.mark.asyncio
+async def test_visualization_consumer_send_message():
+    """Test that send_message sends the correct JSON message."""
+    application = VisualizationConsumer()
+    application.scope = {"user": type("User", (), {"is_authenticated": True})()}
+    sent = {}
+
+    async def fake_send(text):
+        sent["text"] = text
+
+    application.send = fake_send
+    message = {"foo": "bar"}
+    await application.send_message({"message": message})
+    assert json.loads(sent["text"]) == message
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+async def test_visualization_consumer_receives_and_edit(
+    mocker, mock_app_get_ps_db, db_connection, live_chat_dashboard, db_session
+):
+    """Test that receive does nothing (pass)."""
+    mock_app_get_ps_db("tethysapp.tethysdash.controllers.App")
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    mock_broadcast = mocker.patch(
+        "tethysapp.tethysdash.controllers.send_websocket_message"
+    )
+    mock_datetime = mocker.patch("tethysapp.tethysdash.controllers.datetime")
+    date = datetime(2024, 1, 1, 0, 0, 0)
+    mock_datetime.utcnow.return_value = date
+    grid_item_uuid = live_chat_dashboard.tabs[0].grid_items[0].uuid
+    create_partition_for_date(db_connection, date)
+
+    application = VisualizationConsumer()
+
+    # Should not raise
+    websocket_message = {
+        "requestId": grid_item_uuid,
+        "message": "test",
+        "sessionId": "abc",
+        "messageId": "1",
+        "sender": "user1",
+    }
+    await application.receive(text_data=json.dumps(websocket_message))
+    mock_broadcast.assert_called_with(
+        grid_item_uuid,
+        "test",
+        sender="user1",
+        sessionId="abc",
+        timestamp="2024-01-01T00:00:00Z",
+        messageId="1",
+    )
+
+    first_message = (
+        db_session.query(Message)
+        .filter_by(request_id=grid_item_uuid, message_id="1")
+        .first()
+    )
+    assert first_message is not None
+    assert first_message.message == "test"
+    assert first_message.edited is False
+    assert first_message.sender == "user1"
+
+    # Should not raise
+    websocket_message = {
+        "requestId": grid_item_uuid,
+        "message": "second test",
+        "sessionId": "abc",
+        "messageId": "2",
+        "sender": "user1",
+    }
+    await application.receive(text_data=json.dumps(websocket_message))
+    mock_broadcast.assert_called_with(
+        grid_item_uuid,
+        "second test",
+        sender="user1",
+        sessionId="abc",
+        timestamp="2024-01-01T00:00:00Z",
+        messageId="2",
+    )
+
+    second_message = (
+        db_session.query(Message)
+        .filter_by(request_id=grid_item_uuid, message_id="2")
+        .first()
+    )
+    assert second_message is not None
+    assert second_message.message == "second test"
+    assert second_message.edited is False
+    assert second_message.sender == "user1"
+
+    # Should not raise
+    websocket_message = {
+        "requestId": grid_item_uuid,
+        "message": "an edited message",
+        "sessionId": "abc",
+        "messageId": "1",
+        "sender": "new user1",
+    }
+    await application.receive(text_data=json.dumps(websocket_message))
+    mock_broadcast.assert_called_with(
+        grid_item_uuid,
+        "an edited message",
+        sender="new user1",
+        sessionId="abc",
+        timestamp="2024-01-01T00:00:00Z",
+        messageId="1",
+    )
+
+    db_session.refresh(first_message)
+    assert first_message is not None
+    assert first_message.message == "an edited message"
+    assert first_message.edited is True
+    assert first_message.sender == "new user1"
+
+    db_session.refresh(second_message)
+    assert second_message is not None
+    assert second_message.sender == "new user1"
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+async def test_visualization_consumer_receive_missing_requestid(mock_app_get_ps_db):
+    """Test that receive does nothing (pass)."""
+    mock_app_get_ps_db("tethysapp.tethysdash.controllers.App")
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+
+    application = VisualizationConsumer()
+    sent = []
+
+    async def fake_send(message):
+        sent.append(message)
+
+    application.send = fake_send
+
+    await application.receive(
+        text_data=json.dumps(
+            {
+                "message": "test",
+                "sessionId": "abc",
+                "messageId": "1",
+                "sender": "user1",
+            }
+        )
+    )
+
+    assert (
+        sent[0]
+        == '{"error": "Invalid message format. requestId, message, sessionId, and sender required."}'  # noqa: E501
+    )
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+async def test_visualization_consumer_receive_not_live_chat(mock_app_get_ps_db):
+    """Test that receive does nothing (pass)."""
+    mock_app_get_ps_db("tethysapp.tethysdash.controllers.App")
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+
+    application = VisualizationConsumer()
+    sent = []
+
+    async def fake_send(message):
+        sent.append(message)
+
+    application.send = fake_send
+
+    await application.receive(
+        text_data=json.dumps(
+            {
+                "requestId": "invalid_uuid",
+                "message": "test",
+                "sessionId": "abc",
+                "messageId": "1",
+                "sender": "user1",
+            }
+        )
+    )
+
+    assert sent[0] == '{"error": "Invalid liveChat request ID."}'
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+async def test_visualization_consumer_receive_rate_limit_error(
+    mock_app_get_ps_db, mocker, create_today_partition, live_chat_dashboard, db_session
+):
+    """Test that receive sends rate limit error when rate limit is exceeded."""
+    mock_app_get_ps_db("tethysapp.tethysdash.controllers.App")
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    grid_item_uuid = live_chat_dashboard.tabs[0].grid_items[0].uuid
+
+    application = VisualizationConsumer()
+    sent = []
+
+    async def fake_send(message):
+        sent.append(message)
+
+    application.send = fake_send
+
+    # Patch only cache.get and cache.ttl
+    mocker.patch("tethysapp.tethysdash.controllers.cache.get", return_value=5)
+    mocker.patch("tethysapp.tethysdash.controllers.cache.ttl", return_value=7)
+
+    await application.receive(
+        text_data=json.dumps(
+            {
+                "requestId": grid_item_uuid,
+                "message": "test",
+                "sessionId": "abc",
+                "messageId": "1",
+                "sender": "user1",
+            }
+        )
+    )
+
+    expected = json.dumps(
+        {
+            "error": "Rate limit exceeded. Please wait 7 seconds before sending more messages.",  # noqa: E501
+            "requestId": grid_item_uuid,
+            "messageId": "1",
+        }
+    )
+    assert sent[0] == expected
+
+    new_message = (
+        db_session.query(Message).filter(Message.request_id == grid_item_uuid).first()
+    )
+    assert new_message is None
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+async def test_visualization_consumer_receive_rate_limit_ttl_None(
+    mock_app_get_ps_db, mocker, create_today_partition, live_chat_dashboard, db_session
+):
+    """Test that receive sends rate limit error when rate limit is exceeded."""
+    mock_app_get_ps_db("tethysapp.tethysdash.controllers.App")
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    grid_item_uuid = live_chat_dashboard.tabs[0].grid_items[0].uuid
+
+    application = VisualizationConsumer()
+    sent = []
+
+    async def fake_send(message):
+        sent.append(message)
+
+    application.send = fake_send
+
+    # Patch only cache.get and cache.ttl
+    mocker.patch("tethysapp.tethysdash.controllers.cache.get", return_value=5)
+    mocker.patch("tethysapp.tethysdash.controllers.cache.ttl", return_value=None)
+
+    await application.receive(
+        text_data=json.dumps(
+            {
+                "requestId": grid_item_uuid,
+                "message": "test",
+                "sessionId": "abc",
+                "messageId": "1",
+                "sender": "user1",
+            }
+        )
+    )
+
+    expected = json.dumps(
+        {
+            "error": "Rate limit exceeded. Please wait 10 seconds before sending more messages.",  # noqa: E501
+            "requestId": grid_item_uuid,
+            "messageId": "1",
+        }
+    )
+    assert sent[0] == expected
+
+    new_message = (
+        db_session.query(Message).filter(Message.request_id == grid_item_uuid).first()
+    )
+    assert new_message is None
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+async def test_visualization_consumer_receive_rate_limit_ttl_exception(
+    mock_app_get_ps_db, mocker, create_today_partition, live_chat_dashboard, db_session
+):
+    """Test that receive sends rate limit error when rate limit is exceeded."""
+    mock_app_get_ps_db("tethysapp.tethysdash.controllers.App")
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    grid_item_uuid = live_chat_dashboard.tabs[0].grid_items[0].uuid
+
+    application = VisualizationConsumer()
+    sent = []
+
+    async def fake_send(message):
+        sent.append(message)
+
+    application.send = fake_send
+
+    # Patch only cache.get and cache.ttl
+    mocker.patch("tethysapp.tethysdash.controllers.cache.get", return_value=5)
+    mocker.patch(
+        "tethysapp.tethysdash.controllers.cache.ttl",
+        side_effect=[Exception("TTL error")],
+    )
+
+    await application.receive(
+        text_data=json.dumps(
+            {
+                "requestId": grid_item_uuid,
+                "message": "test",
+                "sessionId": "abc",
+                "messageId": "1",
+                "sender": "user1",
+            }
+        )
+    )
+
+    expected = json.dumps(
+        {
+            "error": "Rate limit exceeded. Please wait 10 seconds before sending more messages.",  # noqa: E501
+            "requestId": grid_item_uuid,
+            "messageId": "1",
+        }
+    )
+    assert sent[0] == expected
+
+    new_message = (
+        db_session.query(Message).filter(Message.request_id == grid_item_uuid).first()
+    )
+    assert new_message is None
+
+
+@pytest.mark.asyncio
+async def test_visualization_consumer_rate_limit_incr(
+    mock_app_get_ps_db, mocker, create_today_partition, live_chat_dashboard, db_session
+):
+    """
+    Test that VisualizationConsumer.receive calls cache.incr(rate_key)
+    when count > 0 and < 5.
+    """
+    # Patch cache.get and cache.incr
+    mock_cache = mocker.patch("tethysapp.tethysdash.controllers.cache")
+    mock_cache.get.return_value = 2  # Simulate count > 0 and < 5
+    mock_cache.incr = MagicMock()
+
+    mock_app_get_ps_db("tethysapp.tethysdash.controllers.App")
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    grid_item_uuid = live_chat_dashboard.tabs[0].grid_items[0].uuid
+
+    application = VisualizationConsumer()
+    sent = []
+
+    async def fake_send(message):
+        sent.append(message)
+
+    application.send = fake_send
+
+    # Patch only cache.get and cache.ttl
+    mocker.patch("tethysapp.tethysdash.controllers.cache.get", return_value=2)
+
+    await application.receive(
+        text_data=json.dumps(
+            {
+                "requestId": grid_item_uuid,
+                "message": "test",
+                "sessionId": "abc",
+                "messageId": "1",
+                "sender": "user1",
+            }
+        )
+    )
+
+    # Assert cache.incr was called
+    mock_cache.incr.assert_called_once()
+    # Assert no rate limit error was sent
+    assert not any("Rate limit exceeded" in c["error"] for c in sent)
+
+    new_message = (
+        db_session.query(Message).filter(Message.request_id == grid_item_uuid).first()
+    )
+    assert new_message is not None
+    assert new_message.message == "test"
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+async def test_visualization_consumer_receive_failed_broadcast(
+    mocker, mock_app_get_ps_db, create_today_partition, live_chat_dashboard, db_session
+):
+    """Test that receive does nothing (pass)."""
+    mock_app_get_ps_db("tethysapp.tethysdash.controllers.App")
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    mock_broadcast = mocker.patch(
+        "tethysapp.tethysdash.controllers.send_websocket_message"
+    )
+    grid_item_uuid = live_chat_dashboard.tabs[0].grid_items[0].uuid
+
+    mock_broadcast.side_effect = Exception("broadcast failed")
+
+    application = VisualizationConsumer()
+    sent = []
+
+    async def fake_send(message):
+        sent.append(message)
+
+    application.send = fake_send
+
+    # Should not raise
+    await application.receive(
+        text_data=json.dumps(
+            {
+                "requestId": grid_item_uuid,
+                "message": "test",
+                "sessionId": "abc",
+                "messageId": "1",
+                "sender": "user1",
+            }
+        )
+    )
+
+    expected = json.dumps(
+        {
+            "error": "Failed to broadcast message.",
+            "requestId": grid_item_uuid,
+            "messageId": "1",
+        }
+    )
+    assert sent[0] == expected
+
+    new_message = (
+        db_session.query(Message).filter(Message.request_id == grid_item_uuid).first()
+    )
+    assert new_message is None
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+async def test_visualization_consumer_receive_failed_db_save(
+    mocker, mock_app_get_ps_db, create_today_partition, live_chat_dashboard, db_session
+):
+    """Test that receive does nothing (pass)."""
+    mock_app = mocker.patch("tethysapp.tethysdash.controllers.App")
+    mock_app_get_ps_db("tethysapp.tethysdash.model.App")
+    mocker.patch("tethysapp.tethysdash.controllers.send_websocket_message")
+    mock_app.get_persistent_store_database.side_effect = Exception(
+        "database save failed"
+    )
+    grid_item_uuid = live_chat_dashboard.tabs[0].grid_items[0].uuid
+
+    application = VisualizationConsumer()
+    sent = []
+
+    async def fake_send(message):
+        sent.append(message)
+
+    application.send = fake_send
+
+    # Should not raise
+    await application.receive(
+        text_data=json.dumps(
+            {
+                "requestId": grid_item_uuid,
+                "message": "test",
+                "sessionId": "abc",
+                "messageId": "1",
+                "sender": "user1",
+            }
+        )
+    )
+
+    expected = json.dumps(
+        {
+            "error": "Failed to save message.",
+            "requestId": grid_item_uuid,
+            "messageId": "1",
+        }
+    )
+    assert sent[0] == expected
+
+    new_message = (
+        db_session.query(Message).filter(Message.request_id == grid_item_uuid).first()
+    )
+    assert new_message is None
 
 
 @pytest.mark.django_db

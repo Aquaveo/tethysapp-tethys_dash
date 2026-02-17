@@ -1,6 +1,6 @@
 import PropTypes from "prop-types";
 import DataSelect from "components/inputs/DataSelect";
-import { useState, useEffect, memo } from "react";
+import { useState, useEffect, memo, useContext } from "react";
 import FileUpload from "components/inputs/FileUpload";
 import styled from "styled-components";
 import {
@@ -12,6 +12,7 @@ import DataRadioSelect from "components/inputs/DataRadioSelect";
 import NormalInput from "components/inputs/NormalInput";
 import appAPI from "services/api/app";
 import { removeEmptyValues } from "components/modals/utilities";
+import { LayoutContext } from "components/contexts/Contexts";
 import "components/modals/wideModal.css";
 
 const StyledTextInput = styled.textarea`
@@ -22,14 +23,14 @@ const StyledTextInput = styled.textarea`
 // loop through the properties of a source type and extract potential settings and placeholders, setting new values from existing values if applicable
 const generatePropertiesArrayWithValues = (
   sourceProperties,
-  existingPropertyValues
+  existingPropertyValues,
 ) => {
   const properties = [];
   const placeholders = [];
   const types = [];
   let existingValues = existingPropertyValues ?? {};
 
-  const processKeys = (obj, required, parentKey = "", mappingObj = {}) => {
+  const processKeys = (obj, required, parentKey, mappingObj) => {
     // loop through each key/value pair in the object
     for (const [key, value] of Object.entries(obj)) {
       // if processing a nested object, combine the parent with the key to get a master key
@@ -102,6 +103,7 @@ const SourcePane = ({
   const [sourceType, setSourceType] = useState({}); // source type dropdown selection {value: ..., label: ...}
   const [geoJSON, setGeoJSON] = useState("{}"); // track the geojson value
   const [geoJSONSource, setGeoJSONSource] = useState("custom"); // track the geojson value
+  const { uuid } = useContext(LayoutContext);
 
   useEffect(() => {
     // if loading existing layer, then set states appropriately
@@ -109,7 +111,7 @@ const SourcePane = ({
       const { properties, placeholders, types } =
         generatePropertiesArrayWithValues(
           sourcePropertiesOptions[sourceProps.type],
-          sourceProps.props
+          sourceProps.props,
         );
       setSourceProperties(properties);
       SetPropertyPlaceholders(placeholders);
@@ -135,6 +137,7 @@ const SourcePane = ({
       } else {
         const apiResponse = await appAPI.downloadJSON({
           filename: sourceProps.geojson,
+          dashboard_uuid: uuid,
         });
         if (apiResponse.success) {
           setGeoJSON(JSON.stringify(apiResponse.data, null, 4));
@@ -170,7 +173,7 @@ const SourcePane = ({
   function handlePropertyChange({ newValue, rowIndex, field }) {
     // update table values
     const updatedSourceProperties = JSON.parse(
-      JSON.stringify(sourceProperties)
+      JSON.stringify(sourceProperties),
     );
     updatedSourceProperties[rowIndex][field] = newValue;
     setSourceProperties(updatedSourceProperties);
@@ -192,7 +195,7 @@ const SourcePane = ({
     const { properties, placeholders, types } =
       generatePropertiesArrayWithValues(
         sourcePropertiesOptions[e.value],
-        sourceProps.props
+        sourceProps.props,
       );
     setSourceProperties(properties);
     SetPropertyPlaceholders(placeholders);
@@ -200,13 +203,19 @@ const SourcePane = ({
 
     // update layer source props
     const parsedSourceProps = parsePropertiesArray(properties);
-    setSourceProps((previousSourceProps) => ({
-      ...previousSourceProps,
-      ...{
-        type: e.value,
-        props: removeEmptyValues(parsedSourceProps),
-      },
-    }));
+    setSourceProps((previousSourceProps) => {
+      if ("geojson" in previousSourceProps) {
+        delete previousSourceProps.geojson;
+      }
+
+      return {
+        ...previousSourceProps,
+        ...{
+          type: e.value,
+          props: removeEmptyValues(parsedSourceProps),
+        },
+      };
+    });
 
     // reset attribute variable and omitted popup attributes since the source has changed
     setAttributeProps({});

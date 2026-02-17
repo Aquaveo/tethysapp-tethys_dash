@@ -1,6 +1,7 @@
 from tethysapp.tethysdash.plugin_helpers import (
     LayerConfigurationBuilder,
     validate_geojson,
+    send_websocket_message,
 )
 import requests
 import pytest
@@ -436,6 +437,48 @@ def test_layer_configuration_builder_not_implemented_get_layers_and_attrs():
         builder.get_layer_attributes()
 
 
+def test_send_websocket_message_success(mocker):
+    # Patch get_channel_layer and async_to_sync
+    mock_channel_layer = mocker.Mock()
+    mock_async_to_sync = mocker.Mock()
+    mock_group_send = mocker.Mock()
+    mock_async_to_sync.return_value = mock_group_send
+    mocker.patch(
+        "channels.layers.get_channel_layer",
+        return_value=mock_channel_layer,
+    )
+    mocker.patch("asgiref.sync.async_to_sync", mock_async_to_sync)
+
+    send_websocket_message("reqid", {"foo": "bar"}, step=1, total_steps=2)
+
+    mock_async_to_sync.assert_called_once()
+    mock_group_send.assert_called_once_with(
+        "dashboard_updates",
+        {
+            "type": "send_message",
+            "message": {
+                "message": {"foo": "bar"},
+                "requestId": "reqid",
+                "step": 1,
+                "totalSteps": 2,
+            },
+        },
+    )
+
+
+def test_send_websocket_message_exception(mocker):
+    # Patch get_channel_layer and async_to_sync to raise exception
+    mock_async_to_sync = mocker.Mock(side_effect=Exception("fail"))
+    mocker.patch(
+        "channels.layers.get_channel_layer",
+        return_value=mocker.Mock(),
+    )
+    mocker.patch("asgiref.sync.async_to_sync", mock_async_to_sync)
+
+    # Should not raise
+    send_websocket_message("reqid", {"foo": "bar"})
+
+
 def test_validate_geojson_FeatureCollection():
     with pytest.raises(ValueError, match="GeoJSON must be a dictionary."):
         validate_geojson("")
@@ -761,3 +804,47 @@ def test_layer_configuration_builder_style():
             },
         },
     }
+
+
+def test_parse_date_input_valid():
+    from tethysapp.tethysdash.plugin_helpers import parse_date_input
+    import datetime
+
+    # Valid date
+    result = parse_date_input("12/25/2023")
+    assert isinstance(result, datetime.datetime)
+    assert result == datetime.datetime(2023, 12, 25, 0, 0)
+
+
+def test_parse_date_input_invalid():
+    from tethysapp.tethysdash.plugin_helpers import parse_date_input
+    import pytest
+
+    # Invalid format
+    with pytest.raises(ValueError):
+        parse_date_input("2023-12-25")
+    # Not a string
+    with pytest.raises(TypeError):
+        parse_date_input(20231225)
+
+
+def test_parse_date_hour_input_valid():
+    from tethysapp.tethysdash.plugin_helpers import parse_date_hour_input
+    import datetime
+
+    # Valid date and hour
+    result = parse_date_hour_input("12/25/2023 02:30 PM")
+    assert isinstance(result, datetime.datetime)
+    assert result == datetime.datetime(2023, 12, 25, 14, 30)
+
+
+def test_parse_date_hour_input_invalid():
+    from tethysapp.tethysdash.plugin_helpers import parse_date_hour_input
+    import pytest
+
+    # Invalid format
+    with pytest.raises(ValueError):
+        parse_date_hour_input("2023-12-25 14:30")
+    # Not a string
+    with pytest.raises(TypeError):
+        parse_date_hour_input(202312251430)

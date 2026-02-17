@@ -1,6 +1,75 @@
+"""
+Helpers for plugin management and WebSocket messaging in TethysDash.
+
+This module provides utility functions for sending messages via Django Channels
+and other plugin-related helpers.
+"""
+
 import requests
 import xmltodict
 import copy
+from datetime import datetime
+
+
+# General helper for sending messages via Django Channels
+def send_websocket_message(
+    request_id,
+    message,
+    step=None,
+    total_steps=None,
+    sender=None,
+    sessionId=None,
+    timestamp=None,
+    messageId=None,
+):
+    """
+    Send a message to a Django Channels group for WebSocket delivery.
+
+    Args:
+        request_id (str): The request identifier for the message.
+        message (str): The message content to send.
+        step (int, optional): Current step in a multi-step process.
+        total_steps (int, optional): Total steps in a multi-step process.
+        sender (str, optional): Identifier for the message sender.
+        sessionId (str, optional): Session identifier for the message.
+        timestamp (str, optional): Timestamp of the message.
+
+    Example:
+        send_websocket_message('user_123', 'progress_message', 1, 2)
+    """
+    try:
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+
+        websocket_message = {"message": message, "requestId": request_id}
+        if step is not None and total_steps is not None:
+            websocket_message["step"] = step
+            websocket_message["totalSteps"] = total_steps
+
+        if sender:
+            websocket_message["sender"] = sender
+
+        if sessionId:
+            websocket_message["sessionId"] = sessionId
+
+        if timestamp:
+            websocket_message["timestamp"] = timestamp
+
+        if messageId:
+            websocket_message["messageId"] = messageId
+
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            "dashboard_updates",
+            {
+                "type": "send_message",
+                "message": websocket_message,
+            },
+        )
+    except Exception as e:
+        # Optionally log or handle errors here
+        print(f"WebSocket message send failed: {e}")
+
 
 available_source_properties = {
     "ESRI Image and Map Service": {
@@ -916,3 +985,56 @@ def validate_geojson(data):
         raise ValueError("'crs.properties.name' must be a string.")
 
     return True  # Passed all checks
+
+
+def parse_date_hour_input(date_input):
+    """
+    Parse a date and time input string into a datetime object.
+
+    Expects a string in the format "MM/DD/YYYY HH:MM AM/PM"
+    (e.g., "12/25/2023 02:30 PM"). Uses 12-hour time format with AM/PM indicator.
+
+    Args:
+        date_input (str): The date and time string to parse. Must be in format
+                         "MM/DD/YYYY HH:MM AM/PM".
+
+    Returns:
+        datetime: The parsed datetime object.
+
+    Raises:
+        ValueError: If the input string doesn't match the expected format.
+        TypeError: If the input is not a string.
+
+    Example:
+        >>> parse_date_hour_input("12/25/2023 02:30 PM")
+        datetime.datetime(2023, 12, 25, 14, 30)
+    """
+    date_hour_format = "%m/%d/%Y %I:%M %p"
+
+    return datetime.strptime(date_input, date_hour_format)
+
+
+def parse_date_input(date_input):
+    """
+    Parse a date input string into a datetime object.
+
+    Expects a string in the format "MM/DD/YYYY" (e.g., "12/25/2023").
+    The resulting datetime object will have time set to midnight (00:00:00).
+
+    Args:
+        date_input (str): The date string to parse. Must be in format "MM/DD/YYYY".
+
+    Returns:
+        datetime: The parsed datetime object with time set to 00:00:00.
+
+    Raises:
+        ValueError: If the input string doesn't match the expected format.
+        TypeError: If the input is not a string.
+
+    Example:
+        >>> parse_date_input("12/25/2023")
+        datetime.datetime(2023, 12, 25, 0, 0)
+    """
+    date_hour_format = "%m/%d/%Y"
+
+    return datetime.strptime(date_input, date_hour_format)

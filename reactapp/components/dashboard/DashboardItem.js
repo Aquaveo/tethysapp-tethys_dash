@@ -4,11 +4,13 @@ import Container from "react-bootstrap/Container";
 import { memo, useState, useContext, useEffect } from "react";
 import { BsInfoCircle } from "react-icons/bs";
 import {
-  LayoutContext,
   EditingContext,
   VariableInputsContext,
   DataViewerModeContext,
   AppContext,
+  LayoutContext,
+  TabContext,
+  GridItemContext,
 } from "components/contexts/Contexts";
 import { useAppTourContext } from "components/contexts/AppTourContext";
 import DataViewerModal from "components/modals/DataViewer/DataViewer";
@@ -22,6 +24,8 @@ import {
 } from "components/visualizations/utilities";
 import CustomAlert from "components/dashboard/CustomAlert";
 import { loadLayerJSONs, saveLayerJSON } from "components/map/utilities";
+import { valuesEqual } from "components/modals/utilities";
+import { v4 as uuidv4 } from "uuid";
 
 const StyledContainer = styled(Container)`
   position: relative;
@@ -61,7 +65,6 @@ const InfoIconWrapper = styled.div`
   position: absolute;
   top: 0.5rem;
   left: 0.5rem;
-  z-index: 10;
   display: flex;
   align-items: center;
 `;
@@ -73,15 +76,14 @@ const AttributionTooltip = styled.div`
   position: absolute;
   top: 0.5rem;
   left: 0.5rem;
-  background: rgba(255, 255, 255, 0.97);
-  color: #222;
+  background: rgba(0, 0, 0, 0.97);
+  color: #ffffffff;
   border: 1px solid #ccc;
   border-radius: 6px;
   padding: 0.75rem 1.5rem 0.75rem 1rem;
   font-size: 0.95em;
   max-width: 25vw;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-  z-index: 100;
   scrollbar-gutter: stable both-edges;
 `;
 
@@ -108,10 +110,10 @@ export const requiredGridItemKeys = [
   "metadata_string",
 ];
 
-export const handleGridItemExport = async (gridItem) => {
-  const { id, ...exportedGridItem } = gridItem;
+export const handleGridItemExport = async (gridItem, dashboard_uuid) => {
+  const { id, uuid, ...exportedGridItem } = gridItem;
   exportedGridItem.metadata_string = JSON.parse(
-    exportedGridItem.metadata_string
+    exportedGridItem.metadata_string,
   );
   const gridItemArgs = JSON.parse(exportedGridItem.args_string);
   exportedGridItem.args_string = gridItemArgs;
@@ -119,7 +121,11 @@ export const handleGridItemExport = async (gridItem) => {
   if (exportedGridItem.source === "Map") {
     if ("layers" in gridItemArgs && gridItemArgs["layers"].length > 0) {
       for (const mapLayer of gridItemArgs["layers"]) {
-        const apiResponse = await loadLayerJSONs(mapLayer, true);
+        const apiResponse = await loadLayerJSONs(
+          mapLayer,
+          dashboard_uuid,
+          true,
+        );
         if (!apiResponse.success) {
           return apiResponse;
         }
@@ -130,11 +136,15 @@ export const handleGridItemExport = async (gridItem) => {
   return exportedGridItem;
 };
 
-export const handleGridItemImport = async (gridItem, csrf) => {
+export const handleGridItemImport = async (gridItem, csrf, dashboard_uuid) => {
   const importedGridItem = JSON.parse(JSON.stringify(gridItem));
+  if (typeof importedGridItem.args_string === "string") {
+    importedGridItem.args_string = JSON.parse(importedGridItem.args_string);
+  }
+
   if (
     !requiredGridItemKeys.every((key) =>
-      Object.prototype.hasOwnProperty.call(importedGridItem, key)
+      Object.prototype.hasOwnProperty.call(importedGridItem, key),
     )
   ) {
     return {
@@ -161,14 +171,16 @@ export const handleGridItemImport = async (gridItem, csrf) => {
 
         if (
           mapLayer.configuration.props.source.type === "GeoJSON" &&
-          mapLayer.configuration.props.source.geojson
+          mapLayer.configuration.props.source.geojson &&
+          typeof mapLayer.configuration.props.source.geojson === "object"
         ) {
           const apiResponse = await saveLayerJSON({
             stringJSON: JSON.stringify(
-              mapLayer.configuration.props.source.geojson
+              mapLayer.configuration.props.source.geojson,
             ),
             csrf,
             check_crs: true,
+            dashboard_uuid,
           });
 
           if (apiResponse.success) {
@@ -182,6 +194,8 @@ export const handleGridItemImport = async (gridItem, csrf) => {
           const apiResponse = await saveLayerJSON({
             stringJSON: JSON.stringify(mapLayer.configuration.style),
             csrf,
+            check_crs: false,
+            dashboard_uuid,
           });
 
           if (apiResponse.success) {
@@ -195,7 +209,7 @@ export const handleGridItemImport = async (gridItem, csrf) => {
   }
   importedGridItem.args_string = JSON.stringify(importedGridItem.args_string);
   importedGridItem.metadata_string = JSON.stringify(
-    importedGridItem.metadata_string
+    importedGridItem.metadata_string,
   );
 
   return {
@@ -204,13 +218,9 @@ export const handleGridItemImport = async (gridItem, csrf) => {
   };
 };
 
-const DashboardItem = ({
-  gridItemSource,
-  gridItemI,
-  gridItemArgsString,
-  gridItemMetadataString,
-  gridItemIndex,
-}) => {
+const DashboardItem = () => {
+  const { gridItemSource, gridItemI, gridItemMetadataString, gridItemIndex } =
+    useContext(GridItemContext);
   const { isEditing, setIsEditing } = useContext(EditingContext);
   const [showDataViewerModal, setShowDataViewerModal] = useState(false);
   const [gridItemMessage, setGridItemMessage] = useState("");
@@ -218,23 +228,24 @@ const DashboardItem = ({
   const [gridItemWarning, setGridItemWarning] = useState("");
   const [showGridItemWarning, setShowGridItemWarning] = useState(false);
   const [gridItemStyling, setGridItemStyling] = useState(
-    JSON.parse(gridItemMetadataString)
+    JSON.parse(gridItemMetadataString),
   );
-  const { updateGridItems, gridItems } = useContext(LayoutContext);
+  const { getActiveTab, updateTab } = useContext(TabContext);
   const { variableInputValues, setVariableInputValues } = useContext(
-    VariableInputsContext
+    VariableInputsContext,
   );
   const { setInDataViewerMode } = useContext(DataViewerModeContext);
   const { visualizations } = useContext(AppContext);
+  const { uuid } = useContext(LayoutContext);
   const { setAppTourStep, activeAppTour } = useAppTourContext();
   const [attribution, setAttribution] = useState(
-    findVisualizationBySource(visualizations, gridItemSource)?.attribution
+    findVisualizationBySource(visualizations, gridItemSource)?.attribution,
   );
   const [showAttribution, setShowAttribution] = useState(false);
 
   useEffect(() => {
     setAttribution(
-      findVisualizationBySource(visualizations, gridItemSource)?.attribution
+      findVisualizationBySource(visualizations, gridItemSource)?.attribution,
     );
     // eslint-disable-next-line
   }, [gridItemSource]);
@@ -246,10 +257,11 @@ const DashboardItem = ({
 
   async function deleteGridItem(e) {
     if (await confirm("Are you sure you want to delete the item?")) {
+      const { gridItems, id: activeTabId } = getActiveTab();
       const updated_grid_items = JSON.parse(JSON.stringify(gridItems));
       updated_grid_items.splice(gridItemIndex, 1);
 
-      updateGridItems(updated_grid_items);
+      updateTab(activeTabId, { gridItems: updated_grid_items });
       setIsEditing(true);
     }
   }
@@ -264,13 +276,15 @@ const DashboardItem = ({
   }
 
   function updateGridItemOrder(newIndex) {
+    const { gridItems, id: activeTabId } = getActiveTab();
     const updatedGridItems = [...gridItems];
     const [movingGridItem] = updatedGridItems.splice(gridItemIndex, 1);
     updatedGridItems.splice(newIndex, 0, movingGridItem);
-    updateGridItems(updatedGridItems);
+    updateTab(activeTabId, { gridItems: updatedGridItems });
   }
 
   function bringGridItemtoFront() {
+    const { gridItems } = getActiveTab();
     const newIndex = gridItems.length - 1;
     updateGridItemOrder(newIndex);
   }
@@ -291,9 +305,10 @@ const DashboardItem = ({
   }
 
   async function exportGridItem() {
+    const { gridItems } = getActiveTab();
     const gridItem = JSON.parse(JSON.stringify(gridItems[gridItemIndex]));
 
-    const exportedGridItem = await handleGridItemExport(gridItem);
+    const exportedGridItem = await handleGridItemExport(gridItem, uuid);
 
     try {
       downloadJSONFile(exportedGridItem, "TethysDashGridItem.json");
@@ -304,12 +319,15 @@ const DashboardItem = ({
   }
 
   function copyGridItem() {
+    const { gridItems, id: activeTabId } = getActiveTab();
     let maxGridItemI = gridItems.reduce((acc, value) => {
       return (acc = acc > parseInt(value.i) ? acc : parseInt(value.i));
     }, 0);
     const copiedGridItem = getGridItem(gridItems, gridItemI);
     const newGridItem = { ...copiedGridItem };
     newGridItem.i = `${parseInt(maxGridItemI) + 1}`;
+    newGridItem.id = null;
+    newGridItem.uuid = uuidv4();
     if (newGridItem.source === "Variable Input") {
       const newGridItemArgs = JSON.parse(newGridItem.args_string);
       let copiedVariableName = newGridItemArgs.variable_name;
@@ -331,7 +349,7 @@ const DashboardItem = ({
       setVariableInputValues(variableInputValues);
     }
     const updatedGridItems = JSON.parse(JSON.stringify(gridItems));
-    updateGridItems([...updatedGridItems, newGridItem]);
+    updateTab(activeTabId, { gridItems: [...updatedGridItems, newGridItem] });
     setIsEditing(true);
   }
 
@@ -376,6 +394,25 @@ const DashboardItem = ({
         aria-label="gridItemDiv"
         className="no-caret"
       >
+        <StyledContainer
+          fluid
+          className="h-100 gridVisualization"
+          aria-label="gridItem"
+        >
+          <CustomAlert
+            alertType={"success"}
+            showAlert={showGridItemMessage}
+            setShowAlert={setShowGridItemMessage}
+            alertMessage={gridItemMessage}
+          />
+          <CustomAlert
+            alertType={"warning"}
+            showAlert={showGridItemWarning}
+            setShowAlert={setGridItemWarning}
+            alertMessage={gridItemWarning}
+          />
+          <BaseVisualization key={gridItemI} />
+        </StyledContainer>
         {gridItemStyling?.attribution !== false && attribution && (
           <InfoIconWrapper
             onMouseEnter={() => setShowAttribution(true)}
@@ -396,36 +433,8 @@ const DashboardItem = ({
             </AttributionTooltip>
           </InfoIconWrapper>
         )}
-        <StyledContainer
-          fluid
-          className="h-100 gridVisualization"
-          aria-label="gridItem"
-        >
-          <CustomAlert
-            alertType={"success"}
-            showAlert={showGridItemMessage}
-            setShowAlert={setShowGridItemMessage}
-            alertMessage={gridItemMessage}
-          />
-          <CustomAlert
-            alertType={"warning"}
-            showAlert={showGridItemWarning}
-            setShowAlert={setGridItemWarning}
-            alertMessage={gridItemWarning}
-          />
-          <BaseVisualization
-            key={gridItemI}
-            source={gridItemSource}
-            argsString={gridItemArgsString}
-            metadataString={gridItemMetadataString}
-          />
-        </StyledContainer>
         {showDataViewerModal && (
           <DataViewerModal
-            gridItemIndex={gridItemIndex}
-            source={gridItemSource}
-            argsString={gridItemArgsString}
-            metadataString={gridItemMetadataString}
             showModal={showDataViewerModal}
             handleModalClose={hideDataViewerModal}
             setGridItemMessage={setGridItemMessage}
@@ -458,6 +467,8 @@ DashboardItem.propTypes = {
   gridItemArgsString: PropTypes.string,
   gridItemMetadataString: PropTypes.string,
   gridItemIndex: PropTypes.number,
+  gridItemUUID: PropTypes.string,
+  shouldLoad: PropTypes.bool,
 };
 
-export default memo(DashboardItem);
+export default memo(DashboardItem, valuesEqual);

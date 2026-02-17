@@ -1,20 +1,29 @@
-import { parse, format } from "date-fns";
-import { useState, useRef, memo } from "react";
+import { format } from "date-fns";
+import { useRef, memo, useState, useEffect, useContext } from "react";
 import PropTypes from "prop-types";
 import ReactDatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { FaRegCalendarAlt } from "react-icons/fa";
 import "components/inputs/DatePicker.css";
+import { DataViewerModeContext } from "components/contexts/Contexts";
 import styled from "styled-components";
+import {
+  dateHourFormat,
+  parseDateMath,
+  checkForVariable,
+  isRelativeInput,
+  parseDate,
+} from "components/inputs/dateUtils";
 
 const Wrapper = styled.div`
   position: relative;
   display: inline-block;
+  width: 100%;
 `;
 
 const StyledInput = styled.input`
   paddingright: 2rem;
-  width: 200px;
+  width: 100%;
 `;
 
 const StyledButton = styled.button`
@@ -28,99 +37,59 @@ const StyledButton = styled.button`
   padding: 0;
 `;
 
-// Relative date parser
-export const parseDateMath = ({ value, type }) => {
-  if (!value || typeof value !== "string") return null;
-  let date;
+const DatePicker = ({
+  label,
+  value,
+  onChange,
+  divProps,
+  dateFormat = dateHourFormat,
+}) => {
+  const { inDataViewerMode } = useContext(DataViewerModeContext);
 
-  if (value.startsWith("now")) {
-    date = new Date();
-    value = value.slice(3);
-  } else if (value.startsWith("today")) {
-    date = new Date();
-    date.setHours(0, 0, 0, 0);
-    value = value.slice(5);
-  } else {
-    const isoDate = new Date(value);
-    if (!isNaN(isoDate)) {
-      date = isoDate;
-    } else {
-      return null;
-    }
-  }
-
-  const offsetRegex = /([+-])(\d+)([YMWDHmS])/g;
-  let match;
-  while ((match = offsetRegex.exec(value)) !== null) {
-    const sign = match[1] === "+" ? 1 : -1;
-    const amount = parseInt(match[2], 10) * sign;
-    const unit = match[3];
-
-    // eslint-disable-next-line
-    switch (unit) {
-      case "Y":
-        date.setFullYear(date.getFullYear() + amount);
-        break;
-      case "M":
-        date.setMonth(date.getMonth() + amount);
-        break;
-      case "W":
-        date.setDate(date.getDate() + amount * 7);
-        break;
-      case "D":
-        date.setDate(date.getDate() + amount);
-        break;
-      case "H":
-        date.setHours(date.getHours() + amount);
-        break;
-      case "m":
-        date.setMinutes(date.getMinutes() + amount);
-        break;
-      case "S":
-        date.setSeconds(date.getSeconds() + amount);
-        break;
-    }
-  }
-
-  // Return formatted string without any Z / timezone offset
-  return type === "date"
-    ? format(date, "MM/dd/yyyy")
-    : format(date, "MM/dd/yyyy h:mm aa");
-};
-
-const DatePicker = ({ label, value, onChange, type, divProps }) => {
-  const [selectedDate, setSelectedDate] = useState(() => {
-    if (checkForVariable(value)) return null;
-    const parsed = parseDateMath({ value, type });
-    return parsed
-      ? parse(
-          parsed,
-          type === "date-hour" ? "MM/dd/yyyy h:mm aa" : "MM/dd/yyyy",
-          new Date()
-        )
-      : null;
-  });
+  // Track raw input value separately
   const datePickerRef = useRef(null);
-  const [inputValue, setInputValue] = useState(value);
+  const [rawInputValue, setRawInputValue] = useState(value);
 
-  function checkForVariable(val) {
-    return typeof val === "string" && /\$\{[^}]+\}/.test(val);
+  // Update rawInputValue if value prop changes (from parent)
+  useEffect(() => {
+    // Only update rawInputValue if value prop is different from current rawInputValue
+    // or if value is not the formatted version of rawInputValue
+    let formattedRaw = parseDate(rawInputValue, dateFormat, true);
+    if (value !== formattedRaw) {
+      setRawInputValue(value);
+    }
+    // eslint-disable-next-line
+  }, [value]);
+
+  // Derive selectedDate for calendar from value prop (only if not relative)
+  let selectedDate = null;
+  if (!checkForVariable(value)) {
+    selectedDate = parseDate(value, dateFormat);
   }
 
   const onRawChange = (val) => {
-    setInputValue(val);
+    setRawInputValue(val);
+    // Only call onChange if valid absolute or relative time
+    if (isRelativeInput(val)) {
+      const parsedDate = parseDateMath({ value: val });
+      if (inDataViewerMode) {
+        onChange(val);
+      } else {
+        const formattedDate = format(parsedDate, dateFormat);
+        onChange(formattedDate);
+      }
+      return;
+    }
 
     if (checkForVariable(val)) {
       onChange(val);
       return;
     }
 
-    // Try relative date parsing
-    const parsedDate = parseDateMath({ value: val, type });
+    // Absolute date string
+    const parsedDate = parseDate(val, dateFormat, true);
     if (parsedDate) {
       onChange(parsedDate);
-      setSelectedDate(parsedDate);
-      return;
     }
   };
 
@@ -129,13 +98,9 @@ const DatePicker = ({ label, value, onChange, type, divProps }) => {
   };
 
   const handleSelect = (date) => {
-    setSelectedDate(date);
-    const formattedDate =
-      type === "date"
-        ? format(date, "MM/dd/yyyy")
-        : format(date, "MM/dd/yyyy h:mm aa");
+    const formattedDate = format(date, dateFormat);
+    setRawInputValue(format(date, dateHourFormat));
     onChange(formattedDate);
-    setInputValue(formattedDate);
   };
 
   return (
@@ -151,7 +116,7 @@ const DatePicker = ({ label, value, onChange, type, divProps }) => {
             type="text"
             name={label}
             aria-label={label}
-            value={inputValue}
+            value={rawInputValue}
             onChange={(e) => onRawChange(e.target.value)}
           />
 
@@ -169,10 +134,8 @@ const DatePicker = ({ label, value, onChange, type, divProps }) => {
             ref={datePickerRef}
             selected={selectedDate}
             onChange={handleSelect}
-            showTimeInput={type === "date-hour"}
-            dateFormat={
-              type === "date-hour" ? "MM/dd/yyyy h:mm aa" : "MM/dd/yyyy"
-            }
+            showTimeInput={true}
+            dateFormat={dateFormat}
             timeInputLabel="Time:"
             showYearDropdown
             showMonthDropdown
@@ -193,6 +156,7 @@ DatePicker.propTypes = {
   onChange: PropTypes.func,
   value: PropTypes.string,
   divProps: PropTypes.object,
+  dateFormat: PropTypes.string,
 };
 
 export default memo(DatePicker);

@@ -6,11 +6,13 @@ import {
   AvailableDashboardsContext,
   PermissionGroupContext,
 } from "components/contexts/Contexts";
-import { mockedDashboards } from "__tests__/utilities/constants";
+import { mockedDashboards, userDashboard } from "__tests__/utilities/constants";
 import { server } from "__tests__/utilities/server";
 import { rest } from "msw";
 import { baseMapLayers } from "components/visualizations/utilities";
 import ErrorBoundary from "components/error/ErrorBoundary";
+import { nonDropDownVariableInputTypes } from "components/visualizations/utilities";
+import { ModalPriorityProvider } from "components/contexts/ModalPriorityContext";
 
 const TestingComponent = () => {
   const {
@@ -85,16 +87,18 @@ test("AppLoader", async () => {
           ctx.json({
             visualizations: availableVisualizations,
           }),
-          ctx.set("Content-Type", "application/json")
+          ctx.set("Content-Type", "application/json"),
         );
-      }
-    )
+      },
+    ),
   );
 
   render(
-    <Loader>
-      <TestingComponent />
-    </Loader>
+    <ModalPriorityProvider>
+      <Loader>
+        <TestingComponent />
+      </Loader>
+    </ModalPriorityProvider>,
   );
 
   expect(await screen.findByTestId("tethysApp")).toHaveTextContent(
@@ -109,7 +113,11 @@ test("AppLoader", async () => {
       exitUrl: "/apps/",
       rootUrl: "/apps/tethysdash/",
       settingsUrl: "/admin/tethys_apps/tethysapp/999/change/",
-    })
+      customSettings: {
+        support_email: "env_support@tethys.org",
+        support_github: "https://github.com/tethysplatform/tethysdash",
+      },
+    }),
   );
 
   expect(await screen.findByTestId("user")).toHaveTextContent(
@@ -120,11 +128,11 @@ test("AppLoader", async () => {
       email: "jsmith@tethys.org",
       isAuthenticated: true,
       isStaff: true,
-    })
+    }),
   );
 
   expect(await screen.findByTestId("csrf")).toHaveTextContent(
-    "SxICmOkFldX4o4YVaySdZq9sgn0eRd3Ih6uFtY8BgU5tMyZc7n90oJ4M2My5i7cy"
+    "SxICmOkFldX4o4YVaySdZq9sgn0eRd3Ih6uFtY8BgU5tMyZc7n90oJ4M2My5i7cy",
   );
 
   expect(await screen.findByTestId("routes")).toHaveTextContent(
@@ -133,7 +141,7 @@ test("AppLoader", async () => {
       "dashboard-not-found",
       "route-user-uuid",
       "route-public-uuid",
-    ])
+    ]),
   );
 
   expect(await screen.findByTestId("visualizations")).toHaveTextContent(
@@ -197,17 +205,9 @@ test("AppLoader", async () => {
             type: "variableInput",
             args: {
               variable_name: "text",
+              show_label: "checkbox",
               variable_options_source: [
-                "text",
-                "number",
-                "checkbox",
-                "date",
-                "date-hour",
-                {
-                  value: "slider",
-                  label: "slider",
-                  sub_args: { metadata: "custom-SliderMetadata" },
-                },
+                ...nonDropDownVariableInputTypes,
                 {
                   label: "Existing Visualization Inputs",
                   options: [
@@ -229,9 +229,19 @@ test("AppLoader", async () => {
             description:
               "An input that acts as a dashboard variable. This variable can be referenced in other visualizations to allow for dynamic updating.",
           },
+          {
+            source: "Live Chat",
+            value: "Live Chat",
+            label: "Live Chat",
+            type: "liveChat",
+            args: {},
+            tags: ["chat", "default"],
+            description:
+              "A live chart box that allows users to send and receive messages with other users.",
+          },
         ],
       },
-    ])
+    ]),
   );
 
   expect(await screen.findByTestId("mapLayerTemplates")).toHaveTextContent(
@@ -245,7 +255,7 @@ test("AppLoader", async () => {
         tags: [],
         description: "",
       },
-    ])
+    ]),
   );
 
   expect(await screen.findByTestId("visualizationArgs")).toHaveTextContent(
@@ -260,15 +270,15 @@ test("AppLoader", async () => {
         value: "Other: plugin_label_checkbox - Plugin Arg",
         argOptions: "checkbox",
       },
-    ])
+    ]),
   );
 
   expect(await screen.findByTestId("availableDashboards")).toHaveTextContent(
-    JSON.stringify(mockedDashboards.dashboards)
+    JSON.stringify(mockedDashboards.dashboards),
   );
 
   expect(await screen.findByTestId("permissionGroups")).toHaveTextContent(
-    JSON.stringify(mockedDashboards.permission_groups)
+    JSON.stringify(mockedDashboards.permission_groups),
   );
 });
 
@@ -278,21 +288,23 @@ test("AppLoader, load session error", async () => {
       return res(
         ctx.status(500),
         ctx.json({ error: "Internal Server Error" }),
-        ctx.set("Content-Type", "application/json")
+        ctx.set("Content-Type", "application/json"),
       );
-    })
+    }),
   );
 
   render(
     <ErrorBoundary>
-      <Loader>
-        <TestingComponent />
-      </Loader>
-    </ErrorBoundary>
+      <ModalPriorityProvider>
+        <Loader>
+          <TestingComponent />
+        </Loader>
+      </ModalPriorityProvider>
+    </ErrorBoundary>,
   );
 
   expect(
-    await screen.findByText("AxiosError: Request failed with status code 500")
+    await screen.findByText("AxiosError: Request failed with status code 500"),
   ).toBeInTheDocument();
 });
 
@@ -304,21 +316,119 @@ test("AppLoader, load visualization error", async () => {
         return res(
           ctx.status(500),
           ctx.json({ error: "Internal Server Error" }),
-          ctx.set("Content-Type", "application/json")
+          ctx.set("Content-Type", "application/json"),
         );
-      }
-    )
+      },
+    ),
   );
 
   render(
     <ErrorBoundary>
-      <Loader>
-        <TestingComponent />
-      </Loader>
-    </ErrorBoundary>
+      <ModalPriorityProvider>
+        <Loader>
+          <TestingComponent />
+        </Loader>
+      </ModalPriorityProvider>
+    </ErrorBoundary>,
   );
 
   expect(
-    await screen.findByText("AxiosError: Request failed with status code 500")
+    await screen.findByText("AxiosError: Request failed with status code 500"),
   ).toBeInTheDocument();
+});
+
+test("AppLoader, support info from dashboards.support_info", async () => {
+  // Mock dashboards with support_info override
+  const dashboardsWithSupportInfo = {
+    dashboards: [userDashboard],
+    permission_groups: [],
+    support_info: {
+      support_email: "override@tethys.org",
+      support_github: "https://github.com/override/tethysdash",
+    },
+  };
+
+  const availableVisualizations = [
+    {
+      label: "Other",
+      options: [
+        {
+          source: "plugin_source_checkbox",
+          value: "plugin_value_checkbox",
+          label: "plugin_label_checkbox",
+          args: { plugin_arg: "checkbox" },
+          type: "some type",
+          tags: [],
+          description: "",
+        },
+      ],
+    },
+    {
+      label: "Map Layers",
+      options: [
+        {
+          source: "plugin_source_map_layer",
+          value: "plugin_source_map_layer",
+          label: "plugin_source_map_layer",
+          args: {},
+          type: "map_layer",
+          tags: [],
+          description: "",
+        },
+      ],
+    },
+  ];
+
+  server.use(
+    rest.get(
+      "http://api.test/apps/tethysdash/visualizations/list/",
+      (req, res, ctx) => {
+        return res(
+          ctx.status(200),
+          ctx.json({
+            visualizations: availableVisualizations,
+          }),
+          ctx.set("Content-Type", "application/json"),
+        );
+      },
+    ),
+    rest.get(
+      "http://api.test/apps/tethysdash/dashboards/list/",
+      (req, res, ctx) => {
+        return res(
+          ctx.status(200),
+          ctx.json(dashboardsWithSupportInfo),
+          ctx.set("Content-Type", "application/json"),
+        );
+      },
+    ),
+  );
+
+  // Render and check support info override
+  render(
+    <ModalPriorityProvider>
+      <Loader>
+        <TestingComponent />
+      </Loader>
+    </ModalPriorityProvider>,
+  );
+
+  expect(await screen.findByTestId("tethysApp")).toHaveTextContent(
+    JSON.stringify({
+      title: "TethysDash",
+      description: "",
+      tags: "",
+      package: "tethysdash",
+      urlNamespace: "tethysdash",
+      color: "",
+      icon: "/static/tethysdash/images/tethys_dash.png",
+      exitUrl: "/apps/",
+      rootUrl: "/apps/tethysdash/",
+      settingsUrl: "/admin/tethys_apps/tethysapp/999/change/",
+      customSettings: {
+        support_email: "override@tethys.org",
+        support_github: "https://github.com/override/tethysdash",
+      },
+    }),
+  );
 });

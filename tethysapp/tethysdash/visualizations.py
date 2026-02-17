@@ -1,5 +1,5 @@
 import intake
-from tethysapp.tethysdash.model import get_visualization_user_permission
+from tethysapp.tethysdash.model import get_visualization_user_permission, Message
 from tethysapp.tethysdash.app import App
 from tethysapp.tethysdash.exceptions import VisualizationError
 
@@ -145,7 +145,7 @@ def get_available_visualizations(user):
     return {"visualizations": available_visualizations}
 
 
-def get_visualization(viz_source, viz_args, user):
+def get_visualization(viz_source, viz_args, user, viz_request_id):
     """
     Retrieve data from a specific visualization plugin.
 
@@ -156,7 +156,7 @@ def get_visualization(viz_source, viz_args, user):
         viz_source (str): Source identifier for the visualization plugin
         viz_args (dict): Arguments to pass to the visualization plugin
         user: User object to check permissions for
-
+        viz_request_id: Unique identifier for the visualization request
     Returns:
         tuple: (visualization_type, data)
             - visualization_type (str): Type of visualization
@@ -167,6 +167,37 @@ def get_visualization(viz_source, viz_args, user):
         AttributeError: If visualization plugin doesn't exist
         Exception: If data loading fails
     """
+    if viz_source == "Live Chat":
+        print("Fetching live chat messages from database...")
+        Session = App.get_persistent_store_database("primary_db", as_sessionmaker=True)
+        session = Session()
+        try:
+            messages = (
+                session.query(Message)
+                .filter_by(request_id=viz_request_id)
+                .order_by(Message.timestamp.asc())
+                .all()
+            )
+            result = [
+                {
+                    "sender": m.sender,
+                    "sessionId": m.session_id,
+                    "messageId": m.message_id,
+                    "timestamp": m.timestamp.isoformat() + "Z",
+                    "message": m.message,
+                    "edited": m.edited,
+                }
+                for m in messages
+            ]
+        finally:
+            session.close()
+        return viz_source, {"chatHistory": result}
+
+    try:
+        intake.source.registry[viz_source]
+    except KeyError:
+        raise VisualizationError(f"Visualization ({viz_source}) is not installed.")
+
     plugin = getattr(intake, f"open_{viz_source}")
     restricted = getattr(plugin, "visualization_restricted", False)
     if restricted:
@@ -180,6 +211,10 @@ def get_visualization(viz_source, viz_args, user):
         finally:
             session.close()
 
-    data = plugin(**viz_args).read()
+    plugin_instance = plugin(**viz_args)
+    try:
+        data = plugin_instance.read(request_id=viz_request_id)
+    except TypeError:
+        data = plugin_instance.read()
 
     return plugin.visualization_type, data

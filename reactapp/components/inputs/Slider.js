@@ -1,24 +1,67 @@
-import { useState, useEffect, useRef, memo } from "react";
+import { useState, useEffect, useRef, useMemo, memo, useContext } from "react";
 import { Button, Form, Row, Col } from "react-bootstrap";
 import PropTypes from "prop-types";
 import SliderLib from "rc-slider";
 import "rc-slider/assets/index.css";
 import {
+  addSeconds,
   addMinutes,
+  addHours,
   addDays,
   addWeeks,
   addMonths,
   addYears,
+  differenceInSeconds,
   differenceInMinutes,
+  differenceInHours,
   differenceInDays,
   differenceInWeeks,
   differenceInMonths,
   differenceInYears,
   format as formatDate,
 } from "date-fns";
+import { parseDateMath } from "components/inputs/dateUtils";
+import { valuesEqual } from "components/modals/utilities";
+import {
+  GridItemContext,
+  VariableInputsContext,
+} from "components/contexts/Contexts";
+import { checkForVariable } from "components/inputs/dateUtils";
+import {
+  FaPlay,
+  FaStop,
+  FaFastForward,
+  FaForward,
+  FaFastBackward,
+  FaBackward,
+} from "react-icons/fa";
+import styled from "styled-components";
+
+const CenteredButtonSpan = styled.span`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+`;
+
+const ButtonCol = styled(Col)`
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+`;
+
+const FlexDiv = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+`;
 
 export const timeDeltas = {
+  Seconds: addSeconds,
   Minutes: addMinutes,
+  Hours: addHours,
   Days: addDays,
   Weeks: addWeeks,
   Months: addMonths,
@@ -26,19 +69,31 @@ export const timeDeltas = {
 };
 
 const diffDeltas = {
+  Seconds: differenceInSeconds,
   Minutes: differenceInMinutes,
+  Hours: differenceInHours,
   Days: differenceInDays,
   Weeks: differenceInWeeks,
   Months: differenceInMonths,
   Years: differenceInYears,
 };
 
-function dateToIndex(date, minDate, unit) {
-  return diffDeltas[unit](date, minDate);
-}
-
-function indexToDate(index, minDate, unit) {
-  return timeDeltas[unit](minDate, index);
+// Helper function to convert a date to local ISO string (YYYY-MM-DDTHH:mm:ss)
+function toLocalISOString(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return (
+    date.getFullYear() +
+    "-" +
+    pad(date.getMonth() + 1) +
+    "-" +
+    pad(date.getDate()) +
+    "T" +
+    pad(date.getHours()) +
+    ":" +
+    pad(date.getMinutes()) +
+    ":" +
+    pad(date.getSeconds())
+  );
 }
 
 function formatNumber(n, template) {
@@ -50,10 +105,9 @@ function formatNumber(n, template) {
   });
 }
 
-function formatDateValue(date, template) {
+function formatDateValue(date, format) {
   try {
-    if (!date) return "";
-    return formatDate(date, template);
+    return formatDate(parseDateMath({ value: date }), format);
   } catch (err) {
     console.error("Date formatting error:", err.message);
     return date.toString();
@@ -64,6 +118,190 @@ const formatValue = (val, outputFormat, isDateType) => {
   return isDateType
     ? formatDateValue(val, outputFormat)
     : formatNumber(val, outputFormat);
+};
+
+export const calculateSliderValues = ({
+  min,
+  max,
+  step,
+  unit,
+  dataType,
+  rawMinDateFormat,
+  rawMaxDateFormat,
+}) => {
+  // Helper to ensure max is always included
+  const ensureMaxIncluded = (arr, max, eqFn = (a, b) => a === b) => {
+    if (arr.length === 0 || !eqFn(arr[arr.length - 1], max)) arr.push(max);
+    return arr;
+  };
+
+  if (dataType === "Number") {
+    // Convert min and max to step units
+    const arr = [];
+    let steps = Math.floor((max - min) / step);
+    for (let i = 0; i <= steps; i++) {
+      arr.push(min + i * step);
+    }
+    // If last value doesn't match max, add max
+    return ensureMaxIncluded(arr, max);
+  }
+
+  if (dataType === "Date") {
+    const unitMap = {
+      S: "Seconds",
+      m: "Minutes",
+      H: "Hours",
+      D: "Days",
+      W: "Weeks",
+      M: "Months",
+      Y: "Years",
+    };
+
+    const isRelative = (val) =>
+      typeof val === "string" &&
+      /^now([+-]\d+[SmHDWMY])?(-\d+[SmHDWMY])*?$/.test(val);
+
+    // Helper to parse relative date string and return offset in requested unit
+    const unitToHours = {
+      Seconds: 1 / 3600,
+      Minutes: 1 / 60,
+      Hours: 1,
+      Days: 24,
+      Weeks: 168,
+      Months: 730, // Approximate
+      Years: 8760, // Approximate
+    };
+
+    const parseRel = (val, targetUnit) => {
+      if (val === "now") return 0;
+      let total = 0;
+      const regex = /([+-])(\d+)([SmHDWMY])/g;
+      let m;
+      while ((m = regex.exec(val))) {
+        const sign = m[1] === "+" ? 1 : -1;
+        const amount = sign * parseInt(m[2], 10);
+        let srcUnit = unitMap[m[3]];
+
+        // Convert amount in srcUnit to hours, then to targetUnit
+        const asHours = amount * unitToHours[srcUnit];
+        const asTarget = asHours / unitToHours[targetUnit];
+        total += asTarget;
+      }
+      // Always return integer offset for stepping
+      return Math.round(total);
+    };
+
+    if (isRelative(min) && isRelative(max)) {
+      // For relative, output as 'now-xU' where U is unit
+      const unitAbbr = Object.keys(unitMap).find((k) => unitMap[k] === unit);
+      const minVal = parseRel(min, unit);
+      const maxVal = parseRel(max, unit);
+      const arr = [];
+      const stepVal = step;
+      const forward = minVal <= maxVal;
+      let current = minVal;
+      while (
+        (forward && current <= maxVal) ||
+        (!forward && current >= maxVal)
+      ) {
+        let suffix = "now";
+        if (current !== 0) {
+          suffix = `now${current < 0 ? "-" : "+"}${Math.abs(current)}${unitAbbr}`;
+        }
+        arr.push(suffix);
+        current += stepVal * (forward ? 1 : -1);
+      }
+      // Ensure max is included
+      let suffix = "now";
+      if (maxVal !== 0) {
+        suffix = `now${maxVal < 0 ? "-" : "+"}${Math.abs(maxVal)}${unitAbbr}`;
+      }
+      arr.push(suffix);
+      // Remove duplicates
+      return Array.from(new Set(arr));
+    }
+
+    // Convert any relative dates to absolute dates for uniform processing
+    let minDate;
+    let maxDate;
+
+    if (isRelative(min)) {
+      const now = new Date();
+      const offset = parseRel(min, unit);
+      minDate = timeDeltas[unit](now, offset);
+    }
+
+    if (isRelative(max)) {
+      const now = new Date();
+      const offset = parseRel(max, unit);
+      maxDate = timeDeltas[unit](now, offset);
+    }
+
+    // Absolute dates (including converted relative dates)
+    if (!minDate) {
+      minDate =
+        parseDateMath({ value: min, dateFormat: rawMinDateFormat }) ||
+        new Date();
+    }
+    if (!maxDate) {
+      maxDate =
+        parseDateMath({ value: max, dateFormat: rawMaxDateFormat }) ||
+        new Date();
+    }
+    const arr = [];
+    const diff = diffDeltas[unit](maxDate, minDate);
+    let steps = Math.floor(diff / step);
+    for (let i = 0; i <= steps; i++) {
+      const d = timeDeltas[unit](minDate, i * step);
+      arr.push(toLocalISOString(d).replace(/\.\d+$/, ""));
+    }
+    // If last value doesn't match max, add max
+    return ensureMaxIncluded(
+      arr,
+      toLocalISOString(maxDate).replace(/\.\d+$/, ""),
+      (a, b) => a.replace(/\.\d+$/, "") === b.replace(/\.\d+$/, ""),
+    ).map((d) => d.replace(/\.\d+$/, ""));
+  }
+  return [];
+};
+
+// Debounce hook
+const useDebounce = (value, delay) => {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+};
+
+const getInitialIndices = (values, initialValue, initialRange, rangeMode) => {
+  if (rangeMode) {
+    if (Array.isArray(initialRange) && initialRange.length === 2) {
+      return [
+        Math.max(
+          0,
+          values.findIndex((v) => v === initialRange[0]),
+        ),
+        Math.max(
+          0,
+          values.findIndex((v) => v === initialRange[1]),
+        ),
+      ];
+    } else {
+      return [0, values.length - 1];
+    }
+  } else {
+    const idx = values.findIndex((v) => v === initialValue);
+    return idx !== -1 ? idx : 0;
+  }
 };
 
 const Slider = ({
@@ -78,111 +316,145 @@ const Slider = ({
   dataType,
   dateTimeDelta,
   onChange,
+  debounceDelay = 300, // Default 300ms debounce delay
   speeds = [
     { label: "Slow", value: 1000 },
     { label: "Medium", value: 500 },
     { label: "Fast", value: 200 },
   ],
 }) => {
+  const { gridItemArgsString } = useContext(GridItemContext);
+  const { variableInputDateFormats } = useContext(VariableInputsContext);
+  const rawMetadata =
+    JSON.parse(gridItemArgsString || "{}")?.[
+      "variable_options_source.metadata"
+    ] || {};
+  const rawMin = rawMetadata?.min;
+  const rawMax = rawMetadata?.max;
+  const rawMinVar = checkForVariable(rawMin);
+  const rawMaxVar = checkForVariable(rawMax);
+  let rawMinDateFormat;
+  let rawMaxDateFormat;
+
+  if (rawMinVar) {
+    rawMinDateFormat = variableInputDateFormats[rawMinVar];
+  }
+  if (rawMaxVar) {
+    rawMaxDateFormat = variableInputDateFormats[rawMaxVar];
+  }
+
   const isDateType = dataType === "Date";
   const unit = dateTimeDelta;
-
-  const [value, setValue] = useState(() =>
-    rangeMode ? (initialRange ?? [min, max]) : (initialValue ?? min)
+  const values = useMemo(
+    () =>
+      calculateSliderValues({
+        min,
+        max,
+        step,
+        unit,
+        dataType,
+        rawMinDateFormat,
+        rawMaxDateFormat,
+      }),
+    [min, max, step, unit, dataType, rawMinDateFormat, rawMaxDateFormat],
   );
+
+  // Track index/indices
+  const [currentIdx, setCurrentIdx] = useState(() =>
+    getInitialIndices(values, initialValue, initialRange, rangeMode),
+  );
+
+  // Debounced version of currentIdx for onChange calls
+  const debouncedCurrentIdx = useDebounce(currentIdx, debounceDelay);
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(speeds[0].value);
+  const [speed, setSpeed] = useState(
+    speeds.length > 0 ? speeds[0].value : 1000,
+  );
   const intervalRef = useRef(null);
+  const prev = useRef({
+    rangeMode,
+    initialRange,
+    initialValue,
+    min,
+    max,
+  });
 
+  // Update speed if speeds prop changes
   useEffect(() => {
-    let newValue = value;
-
-    if (rangeMode) {
-      if (Array.isArray(initialRange)) {
-        newValue = initialRange;
-      } else {
-        newValue = [min, max];
-      }
-    } else {
-      if (
-        typeof initialValue === "number" ||
-        typeof initialValue === "string"
-      ) {
-        newValue = initialValue;
-      } else {
-        newValue = min;
-      }
+    if (Array.isArray(speeds) && speeds.length > 0) {
+      setSpeed((prev) => {
+        // If current speed is not in new speeds, reset to first
+        const found = speeds.find((s) => s.value === prev);
+        return found ? prev : speeds[0].value;
+      });
     }
-    setValue(newValue);
     // eslint-disable-next-line
-  }, [rangeMode, isDateType, onChange, initialRange, initialValue, min, max]);
+  }, [JSON.stringify(speeds)]);
 
   useEffect(() => {
-    if (rangeMode) {
-      onChange(
-        value.map((v) => formatValue(v, outputFormat, isDateType)).join(",")
+    // Only update index if relevant props changed
+    const shouldUpdate =
+      prev.current.rangeMode !== rangeMode ||
+      !valuesEqual(prev.current.initialRange, initialRange) ||
+      prev.current.initialValue !== initialValue ||
+      prev.current.min !== min ||
+      prev.current.max !== max ||
+      prev.current.valuesLength !== values.length;
+    if (shouldUpdate) {
+      setCurrentIdx(
+        getInitialIndices(values, initialValue, initialRange, rangeMode),
       );
+      prev.current = {
+        rangeMode,
+        initialRange,
+        initialValue,
+        min,
+        max,
+        valuesLength: values.length,
+      };
+    }
+  }, [rangeMode, initialRange, initialValue, min, max, values]);
+
+  useEffect(() => {
+    // Only call onChange if index actually changed
+    if (rangeMode) {
+      const arr = Array.isArray(debouncedCurrentIdx)
+        ? debouncedCurrentIdx
+        : [0, values.length - 1];
+      const formatted = arr
+        .map((i) => formatValue(values[i], outputFormat, isDateType))
+        .join(",");
+      onChange(formatted);
     } else {
-      onChange(formatValue(value, outputFormat, isDateType));
+      const formatted = formatValue(
+        values[debouncedCurrentIdx],
+        outputFormat,
+        isDateType,
+      );
+      onChange(formatted);
     }
     // eslint-disable-next-line
-  }, [value, outputFormat]);
+  }, [debouncedCurrentIdx, outputFormat, rangeMode, isDateType, values]);
 
   useEffect(() => {
     if (playing) {
       intervalRef.current = setInterval(() => {
-        setValue((v) => {
+        setCurrentIdx((idx) => {
           if (rangeMode) {
-            // Range mode play logic:
-            // Advance both values by step, loop when max reached
-
-            if (isDateType && unit) {
-              const minDateObj = new Date(min);
-              const maxDateObj = new Date(max);
-
-              const startIndex = dateToIndex(new Date(v[0]), minDateObj, unit);
-              const endIndex = dateToIndex(new Date(v[1]), minDateObj, unit);
-              const rangeSize = endIndex - startIndex;
-
-              let nextStart = startIndex + Number(step);
-              let nextEnd = endIndex + Number(step);
-
-              if (nextEnd > dateToIndex(maxDateObj, minDateObj, unit)) {
-                nextStart = 0;
-                nextEnd = rangeSize;
-              }
-
-              const nextRange = [
-                indexToDate(nextStart, minDateObj, unit).toISOString(),
-                indexToDate(nextEnd, minDateObj, unit).toISOString(),
-              ];
-              return nextRange;
-            } else {
-              // Numeric range mode
-              const rangeSize = v[1] - v[0];
-              let nextStart = v[0] + Number(step);
-              let nextEnd = v[1] + Number(step);
-
-              if (nextEnd > max) {
-                nextStart = min;
-                nextEnd = min + rangeSize;
-              }
-              return [nextStart, nextEnd];
+            let [start, end] = idx;
+            const rangeSize = end - start;
+            let nextStart = start + 1;
+            let nextEnd = end + 1;
+            // If nextEnd exceeds bounds, wrap to first valid range
+            if (nextEnd > values.length - 1) {
+              nextStart = 0;
+              nextEnd = rangeSize;
             }
+            if (nextEnd <= nextStart) nextEnd = nextStart + 1;
+            return [nextStart, nextEnd];
           } else {
-            // Single value play logic
-            if (isDateType && unit) {
-              const currentDate = new Date(v);
-              const nextDate = indexToDate(
-                dateToIndex(currentDate, new Date(min), unit) + Number(step),
-                new Date(min),
-                unit
-              );
-              return nextDate > new Date(max) ? min : nextDate.toISOString();
-            } else {
-              const next = v + Number(step);
-              return next > max ? min : next;
-            }
+            let next = idx + 1;
+            return next >= values.length ? 0 : next;
           }
         });
       }, speed);
@@ -190,51 +462,79 @@ const Slider = ({
       clearInterval(intervalRef.current);
     }
     return () => clearInterval(intervalRef.current);
-  }, [playing, speed, step, min, max, isDateType, unit, rangeMode]);
+  }, [playing, speed, values, rangeMode]);
 
   const onRangeChange = (val) => {
     if (rangeMode) {
-      const snapped = val.map((n) => Math.round(n / step) * step);
-      if (isDateType && unit) {
-        const newDates = snapped.map((idx) =>
-          indexToDate(idx, new Date(min), unit).toISOString()
-        );
-        setValue(newDates);
-      } else {
-        setValue(snapped);
-      }
+      setCurrentIdx([val[0], val[1]]);
     } else {
-      const snapped = Math.round(val / step) * step;
-      if (isDateType && unit) {
-        const newDate = indexToDate(snapped, new Date(min), unit);
-        setValue(newDate.toISOString());
-      } else {
-        setValue(snapped);
-      }
+      setCurrentIdx(val);
     }
   };
 
-  if (rangeMode && !Array.isArray(value)) return null; // or a loading state
-  if (!rangeMode && Array.isArray(value)) return null;
-
-  const sliderValue = (() => {
+  const goToFirst = () => {
     if (rangeMode) {
-      return isDateType && unit
-        ? value.map((v) => dateToIndex(new Date(v), new Date(min), unit))
-        : value;
+      let rangeSize = 1;
+      rangeSize = currentIdx[1] - currentIdx[0];
+      rangeSize = Math.max(1, Math.min(rangeSize, values.length - 1));
+      setCurrentIdx([0, rangeSize]);
+    } else {
+      setCurrentIdx(0);
     }
-    return isDateType && unit
-      ? dateToIndex(new Date(value), new Date(min), unit)
-      : value;
-  })();
+  };
 
-  const sliderMin = isDateType && unit ? 0 : min;
-  const sliderMax =
-    isDateType && unit ? dateToIndex(new Date(max), new Date(min), unit) : max;
+  const goToLast = () => {
+    if (rangeMode) {
+      let rangeSize = 1;
+      rangeSize = currentIdx[1] - currentIdx[0];
+      rangeSize = Math.max(1, Math.min(rangeSize, values.length - 1));
+      setCurrentIdx([values.length - 1 - rangeSize, values.length - 1]);
+    } else {
+      setCurrentIdx(values.length - 1);
+    }
+  };
 
+  const goBackStep = () => {
+    if (rangeMode) {
+      let rangeSize = 1;
+      rangeSize = currentIdx[1] - currentIdx[0];
+      rangeSize = Math.max(1, Math.min(rangeSize, values.length - 1));
+      let [start] = currentIdx;
+      let newStart = Math.max(0, start - 1);
+      let newEnd = Math.min(values.length - 1, newStart + rangeSize);
+      setCurrentIdx([newStart, newEnd]);
+    } else {
+      setCurrentIdx(Math.max(0, currentIdx - 1));
+    }
+  };
+
+  const goForwardStep = () => {
+    if (rangeMode) {
+      let rangeSize = 1;
+      rangeSize = currentIdx[1] - currentIdx[0];
+      rangeSize = Math.max(1, Math.min(rangeSize, values.length - 1));
+      let [start] = currentIdx;
+      let newStart = Math.min(values.length - 1 - rangeSize, start + 1);
+      let newEnd = Math.min(values.length - 1, newStart + rangeSize);
+      setCurrentIdx([newStart, newEnd]);
+    } else {
+      setCurrentIdx(Math.min(values.length - 1, currentIdx + 1));
+    }
+  };
+
+  if (rangeMode && (!Array.isArray(currentIdx) || currentIdx.length !== 2))
+    return null;
+  if (!rangeMode && Array.isArray(currentIdx)) return null;
+
+  const sliderValue = rangeMode ? currentIdx : currentIdx;
+  const sliderMin = 0;
+  const sliderMax = values.length - 1;
   const displayValue = rangeMode
-    ? value.map((v) => formatValue(v, outputFormat, isDateType)).join(" - ")
-    : formatValue(value, outputFormat, isDateType);
+    ? `${formatValue(values[currentIdx[0]], outputFormat, isDateType)} - ${formatValue(values[currentIdx[1]], outputFormat, isDateType)}`
+    : formatValue(values[currentIdx], outputFormat, isDateType);
+
+  const showPlayControls = Array.isArray(speeds) && speeds.length > 0;
+  const showSpeedDropdown = Array.isArray(speeds) && speeds.length > 1;
 
   return (
     <>
@@ -244,13 +544,116 @@ const Slider = ({
         </Form.Label>
       )}
       <Form>
+        {/* Controls row: all buttons and speed above slider */}
+        <Row className="align-items-center mb-2 justify-content-center">
+          <ButtonCol>
+            <FlexDiv>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={goToFirst}
+                title="Go to first"
+                aria-label="go to first"
+                disabled={playing}
+              >
+                <CenteredButtonSpan>
+                  <FaFastBackward />
+                </CenteredButtonSpan>
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={goBackStep}
+                title="Previous step"
+                aria-label="previous step"
+                disabled={playing}
+              >
+                <CenteredButtonSpan>
+                  <FaBackward />
+                </CenteredButtonSpan>
+              </Button>
+            </FlexDiv>
+            <FlexDiv>
+              {showSpeedDropdown && (
+                <>
+                  <Form.Label className="mb-0 ms-2">
+                    <b>Speed:</b>
+                  </Form.Label>
+                  <Form.Select
+                    value={speed}
+                    onChange={(e) => setSpeed(Number(e.target.value))}
+                    disabled={playing}
+                    aria-label="Speed select"
+                    style={{ width: "auto", minWidth: "80px" }}
+                    size="sm"
+                  >
+                    {speeds.map(({ label, value }) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </Form.Select>
+                </>
+              )}
+              {showPlayControls &&
+                (!playing ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => setPlaying(true)}
+                    title="Play"
+                    aria-label="play"
+                  >
+                    <CenteredButtonSpan>
+                      <FaPlay />
+                    </CenteredButtonSpan>
+                  </Button>
+                ) : (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => setPlaying(false)}
+                    title="Stop"
+                    aria-label="stop"
+                  >
+                    <CenteredButtonSpan>
+                      <FaStop />
+                    </CenteredButtonSpan>
+                  </Button>
+                ))}
+            </FlexDiv>
+            <FlexDiv>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={goForwardStep}
+                title="Next step"
+                aria-label="next step"
+                disabled={playing}
+              >
+                <CenteredButtonSpan>
+                  <FaForward />
+                </CenteredButtonSpan>
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={goToLast}
+                title="Go to last"
+                aria-label="go to last"
+                disabled={playing}
+              >
+                <CenteredButtonSpan>
+                  <FaFastForward />
+                </CenteredButtonSpan>
+              </Button>
+            </FlexDiv>
+          </ButtonCol>
+        </Row>
         <Row className="align-items-center">
-          {/* Start value */}
           <Col xs="auto" className="text-center" aria-label="Min Value">
-            <strong>{formatValue(min, outputFormat, isDateType)}</strong>
+            <strong>{formatValue(values[0], outputFormat, isDateType)}</strong>
           </Col>
-
-          {/* Slider */}
           <Col>
             <SliderLib
               range={rangeMode}
@@ -273,52 +676,18 @@ const Slider = ({
                 },
               }}
             />
-            <div
-              aria-label="Display Value"
-              className="text-center fw-bold mt-2"
-            >
+          </Col>
+          <Col xs="auto" className="text-center" aria-label="Max Value">
+            <strong>
+              {formatValue(values[values.length - 1], outputFormat, isDateType)}
+            </strong>
+          </Col>
+        </Row>
+        <Row className="align-items-center">
+          <Col>
+            <div aria-label="Display Value" className="text-center fw-bold">
               {displayValue}
             </div>
-          </Col>
-
-          {/* End value */}
-          <Col xs="auto" className="text-center" aria-label="Max Value">
-            <strong>{formatValue(max, outputFormat, isDateType)}</strong>
-          </Col>
-
-          {/* Controls */}
-          <Col xs="auto" className="d-flex flex-column gap-2">
-            {!playing ? (
-              <Button
-                variant="primary"
-                onClick={() => setPlaying(true)}
-                title="Play"
-                aria-label="play"
-              >
-                ▶️
-              </Button>
-            ) : (
-              <Button
-                variant="danger"
-                onClick={() => setPlaying(false)}
-                title="Stop"
-                aria-label="stop"
-              >
-                ⏹️
-              </Button>
-            )}
-            <Form.Select
-              value={speed}
-              onChange={(e) => setSpeed(Number(e.target.value))}
-              disabled={playing}
-              aria-label="Speed select"
-            >
-              {speeds.map(({ label, value }) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </Form.Select>
           </Col>
         </Row>
       </Form>
@@ -333,18 +702,19 @@ Slider.propTypes = {
   max: PropTypes.oneOfType([PropTypes.number, PropTypes.string]).isRequired,
   initialValue: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
   initialRange: PropTypes.arrayOf(
-    PropTypes.oneOfType([PropTypes.number, PropTypes.string])
+    PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
   ),
   rangeMode: PropTypes.bool,
   outputFormat: PropTypes.string.isRequired,
   dataType: PropTypes.string.isRequired,
   dateTimeDelta: PropTypes.string,
   onChange: PropTypes.func.isRequired,
+  debounceDelay: PropTypes.number,
   speeds: PropTypes.arrayOf(
     PropTypes.shape({
       label: PropTypes.string.isRequired,
       value: PropTypes.number.isRequired,
-    })
+    }),
   ),
 };
 

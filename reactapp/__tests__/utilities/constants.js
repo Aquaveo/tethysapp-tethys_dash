@@ -41,7 +41,11 @@ export const mockedLandingPageDashboards = {
       name: "editable",
       description: "test_description",
       publicDashboard: false,
+      userPermission: "admin",
+      permissions: [],
+      unrestrictedPlacement: false,
       image: "my_image.png",
+      owner: "owner",
     },
   ],
   public: [
@@ -51,7 +55,11 @@ export const mockedLandingPageDashboards = {
       name: "noneditable",
       description: "test_description2",
       publicDashboard: true,
+      userPermission: "viewer",
+      permissions: [],
+      unrestrictedPlacement: false,
       image: "public_image.png",
+      owner: "admin",
     },
   ],
 };
@@ -67,18 +75,26 @@ export const userDashboard = {
   userPermission: "admin",
   unrestrictedPlacement: false,
   notes: "user_notes",
-  gridItems: [
+  tabs: [
     {
-      i: "1",
-      x: 0,
-      y: 0,
-      w: 20,
-      h: 20,
-      source: "",
-      args_string: "{}",
-      metadata_string: JSON.stringify({
-        refreshRate: 0,
-      }),
+      id: 1,
+      name: "Tab 1",
+      gridItems: [
+        {
+          id: 1,
+          uuid: "some-uuid-1",
+          i: "1",
+          x: 0,
+          y: 0,
+          w: 20,
+          h: 20,
+          source: "",
+          args_string: "{}",
+          metadata_string: JSON.stringify({
+            refreshRate: 0,
+          }),
+        },
+      ],
     },
   ],
 };
@@ -94,18 +110,26 @@ export const publicDashboard = {
   userPermission: null,
   unrestrictedPlacement: false,
   notes: "public_notes",
-  gridItems: [
+  tabs: [
     {
-      i: "1",
-      x: 0,
-      y: 0,
-      w: 20,
-      h: 20,
-      source: "",
-      args_string: "{}",
-      metadata_string: JSON.stringify({
-        refreshRate: 0,
-      }),
+      id: 1,
+      name: "Tab 1",
+      gridItems: [
+        {
+          id: 1,
+          uuid: "some-uuid-1",
+          i: "1",
+          x: 0,
+          y: 0,
+          w: 20,
+          h: 20,
+          source: "",
+          args_string: "{}",
+          metadata_string: JSON.stringify({
+            refreshRate: 0,
+          }),
+        },
+      ],
     },
   ],
 };
@@ -124,18 +148,26 @@ export const viewerDashboard = {
   userPermission: "viewer",
   unrestrictedPlacement: false,
   notes: "viewer_notes",
-  gridItems: [
+  tabs: [
     {
-      i: "1",
-      x: 0,
-      y: 0,
-      w: 20,
-      h: 20,
-      source: "",
-      args_string: "{}",
-      metadata_string: JSON.stringify({
-        refreshRate: 0,
-      }),
+      id: 1,
+      name: "Tab 1",
+      gridItems: [
+        {
+          id: 1,
+          uuid: "some-uuid-1",
+          i: "1",
+          x: 0,
+          y: 0,
+          w: 20,
+          h: 20,
+          source: "",
+          args_string: "{}",
+          metadata_string: JSON.stringify({
+            refreshRate: 0,
+          }),
+        },
+      ],
     },
   ],
 };
@@ -154,18 +186,26 @@ export const editorDashboard = {
   userPermission: "editor",
   unrestrictedPlacement: false,
   notes: "editor_notes",
-  gridItems: [
+  tabs: [
     {
-      i: "1",
-      x: 0,
-      y: 0,
-      w: 20,
-      h: 20,
-      source: "",
-      args_string: "{}",
-      metadata_string: JSON.stringify({
-        refreshRate: 0,
-      }),
+      id: 1,
+      name: "Tab 1",
+      gridItems: [
+        {
+          id: 1,
+          uuid: "some-uuid-1",
+          i: "1",
+          x: 0,
+          y: 0,
+          w: 20,
+          h: 20,
+          source: "",
+          args_string: "{}",
+          metadata_string: JSON.stringify({
+            refreshRate: 0,
+          }),
+        },
+      ],
     },
   ],
 };
@@ -184,18 +224,25 @@ export const adminDashboard = {
   userPermission: "admin",
   unrestrictedPlacement: false,
   notes: "admin_notes",
-  gridItems: [
+  tabs: [
     {
-      i: "1",
-      x: 0,
-      y: 0,
-      w: 20,
-      h: 20,
-      source: "",
-      args_string: "{}",
-      metadata_string: JSON.stringify({
-        refreshRate: 0,
-      }),
+      id: 1,
+      name: "Tab 1",
+      gridItems: [
+        {
+          id: 1,
+          uuid: "some-uuid-1",
+          x: 0,
+          y: 0,
+          w: 20,
+          h: 20,
+          source: "",
+          args_string: "{}",
+          metadata_string: JSON.stringify({
+            refreshRate: 0,
+          }),
+        },
+      ],
     },
   ],
 };
@@ -430,19 +477,26 @@ export const updatedDashboard = {
   notes: "test_notes",
   editable: true,
   publicDashboard: false,
-  gridItems: [
+  tabs: [
     {
       id: 1,
-      i: "1",
-      x: 0,
-      y: 0,
-      w: 20,
-      h: 20,
-      source: "",
-      args_string: "{}",
-      metadata_string: JSON.stringify({
-        refreshRate: 0,
-      }),
+      name: "Tab 1",
+      gridItems: [
+        {
+          id: 1,
+          uuid: "some-uuid-1",
+          i: "1",
+          x: 0,
+          y: 0,
+          w: 20,
+          h: 20,
+          source: "",
+          args_string: "{}",
+          metadata_string: JSON.stringify({
+            refreshRate: 0,
+          }),
+        },
+      ],
     },
   ],
 };
@@ -454,19 +508,26 @@ export const newDashboard = {
   notes: "test_notes3",
   editable: true,
   publicDashboard: false,
-  gridItems: [
+  tabs: [
     {
       id: 1,
-      i: "1",
-      x: 0,
-      y: 0,
-      w: 20,
-      h: 20,
-      source: "",
-      args_string: "{}",
-      metadata_string: JSON.stringify({
-        refreshRate: 0,
-      }),
+      name: "Tab 1",
+      gridItems: [
+        {
+          id: 1,
+          uuid: "some-uuid-1",
+          i: "1",
+          x: 0,
+          y: 0,
+          w: 20,
+          h: 20,
+          source: "",
+          args_string: "{}",
+          metadata_string: JSON.stringify({
+            refreshRate: 0,
+          }),
+        },
+      ],
     },
   ],
 };
@@ -478,24 +539,33 @@ export const copiedDashboard = {
   notes: "test_notes",
   editable: true,
   publicDashboard: false,
-  gridItems: [
+  tabs: [
     {
       id: 1,
-      i: "1",
-      x: 0,
-      y: 0,
-      w: 20,
-      h: 20,
-      source: "",
-      args_string: "{}",
-      metadata_string: JSON.stringify({
-        refreshRate: 0,
-      }),
+      name: "Tab 1",
+      gridItems: [
+        {
+          id: 1,
+          uuid: "some-uuid-1",
+          i: "1",
+          x: 0,
+          y: 0,
+          w: 20,
+          h: 20,
+          source: "",
+          args_string: "{}",
+          metadata_string: JSON.stringify({
+            refreshRate: 0,
+          }),
+        },
+      ],
     },
   ],
 };
 
 export const mockedApiImageBase = {
+  id: 1,
+  uuid: "some-uuid-1",
   i: "1",
   x: 0,
   y: 0,
@@ -512,6 +582,8 @@ export const mockedApiImageBase = {
 
 export const mockedPlotBase = {
   i: "1",
+  id: 1,
+  uuid: "some-uuid-1",
   x: 0,
   y: 0,
   w: 20,
@@ -563,6 +635,8 @@ export const mockedPlotData = {
 };
 
 export const mockedTableBase = {
+  id: 1,
+  uuid: "some-uuid-1",
   i: "1",
   x: 0,
   y: 0,
@@ -607,6 +681,8 @@ export const mockedTableData = {
 
 export const mockedCardBase = {
   i: "1",
+  id: 1,
+  uuid: "some-uuid-1",
   x: 0,
   y: 0,
   w: 20,
@@ -644,8 +720,25 @@ export const mockedCardData = {
   title: "Company Statistics",
 };
 
+export const mockedLiveChatBase = {
+  i: "1",
+  id: 1,
+  uuid: "some-uuid-1",
+  x: 0,
+  y: 0,
+  w: 20,
+  h: 20,
+  source: "Live Chat",
+  args_string: JSON.stringify({}),
+  metadata_string: JSON.stringify({
+    refreshRate: 0,
+  }),
+};
+
 export const mockedMapBase = {
   i: "1",
+  id: 1,
+  uuid: "some-uuid-1",
   x: 0,
   y: 0,
   w: 20,
@@ -808,6 +901,8 @@ export const mockedMapData = {
 };
 
 export const mockedUnknownBase = {
+  id: 1,
+  uuid: "some-uuid-1",
   i: "1",
   x: 0,
   y: 0,
@@ -821,6 +916,8 @@ export const mockedUnknownBase = {
 };
 
 export const mockedCustomImageBase = {
+  id: 1,
+  uuid: "some-uuid-1",
   i: "1",
   x: 0,
   y: 0,
@@ -836,6 +933,8 @@ export const mockedCustomImageBase = {
 };
 
 export const mockedTextBase = {
+  id: 1,
+  uuid: "some-uuid-1",
   i: "1",
   x: 0,
   y: 0,
@@ -851,6 +950,8 @@ export const mockedTextBase = {
 };
 
 export const mockedSliderVariable = {
+  id: 1,
+  uuid: "some-uuid-1",
   i: "1",
   x: 0,
   y: 0,
@@ -876,7 +977,55 @@ export const mockedSliderVariable = {
   }),
 };
 
+export const mockedDateRangeVariable = {
+  id: 1,
+  uuid: "some-uuid-1",
+  i: "1",
+  x: 0,
+  y: 0,
+  w: 20,
+  h: 20,
+  source: "Variable Input",
+  args_string: JSON.stringify({
+    variable_name: "Test Variable",
+    variable_options_source: "date-range",
+    "variable_options_source.metadata": {
+      format: "MM/dd/yyyy'T'HH:mm",
+      startDateVariable: "Start Date",
+      endDateVariable: "End Date",
+    },
+    initial_value: {
+      "Start Date": "01/14/2026T00:00",
+      "End Date": "01/16/2026T00:00",
+    },
+  }),
+  metadata_string: JSON.stringify({
+    refreshRate: 0,
+  }),
+};
+
+export const mockedCSVUploaderVariable = {
+  id: 1,
+  uuid: "some-uuid-1",
+  i: "1",
+  x: 0,
+  y: 0,
+  w: 20,
+  h: 20,
+  source: "Variable Input",
+  args_string: JSON.stringify({
+    initial_value: "",
+    variable_name: "Test Variable",
+    variable_options_source: "csv-uploader",
+    "variable_options_source.metadata": {
+      headers: ["A", "B"],
+    },
+  }),
+};
+
 export const mockedDateVariable = {
+  id: 1,
+  uuid: "some-uuid-1",
   i: "1",
   x: 0,
   y: 0,
@@ -887,6 +1036,9 @@ export const mockedDateVariable = {
     initial_value: "",
     variable_name: "Test Variable",
     variable_options_source: "date",
+    "variable_options_source.metadata": {
+      format: "MM/dd/yyyy",
+    },
   }),
   metadata_string: JSON.stringify({
     refreshRate: 0,
@@ -894,6 +1046,8 @@ export const mockedDateVariable = {
 };
 
 export const mockedDateHourVariable = {
+  id: 1,
+  uuid: "some-uuid-1",
   i: "1",
   x: 0,
   y: 0,
@@ -904,6 +1058,9 @@ export const mockedDateHourVariable = {
     initial_value: "",
     variable_name: "Test Variable",
     variable_options_source: "date-hour",
+    "variable_options_source.metadata": {
+      format: "MM/dd/yyyy h:mm aa",
+    },
   }),
   metadata_string: JSON.stringify({
     refreshRate: 0,
@@ -911,6 +1068,8 @@ export const mockedDateHourVariable = {
 };
 
 export const mockedTextVariable = {
+  id: 1,
+  uuid: "some-uuid-1",
   i: "1",
   x: 0,
   y: 0,
@@ -928,6 +1087,8 @@ export const mockedTextVariable = {
 };
 
 export const mockedNumberVariable = {
+  id: 1,
+  uuid: "some-uuid-1",
   i: "1",
   x: 0,
   y: 0,
@@ -945,6 +1106,8 @@ export const mockedNumberVariable = {
 };
 
 export const mockedCheckboxVariable = {
+  id: 1,
+  uuid: "some-uuid-1",
   i: "1",
   x: 0,
   y: 0,
@@ -962,6 +1125,8 @@ export const mockedCheckboxVariable = {
 };
 
 export const mockedNullCheckboxVariable = {
+  id: 1,
+  uuid: "some-uuid-1",
   i: "1",
   x: 0,
   y: 0,
@@ -979,6 +1144,8 @@ export const mockedNullCheckboxVariable = {
 };
 
 export const mockedDropdownVariable = {
+  id: 1,
+  uuid: "some-uuid-1",
   i: "1",
   x: 0,
   y: 0,
@@ -1049,9 +1216,9 @@ export const legendItems = {
       symbol: "circle",
     },
     {
-      label: "upTriangle",
+      label: "triangle",
       color: "#4935d0",
-      symbol: "upTriangle",
+      symbol: "triangle",
     },
     {
       label: "rightTriangle",

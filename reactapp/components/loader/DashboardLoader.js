@@ -1,5 +1,13 @@
 import PropTypes from "prop-types";
-import { useState, useEffect, useContext, useRef, memo } from "react";
+import {
+  useState,
+  useEffect,
+  useContext,
+  useRef,
+  memo,
+  useCallback,
+  useMemo,
+} from "react";
 import LoadingAnimation from "components/loader/LoadingAnimation";
 import appAPI from "services/api/app";
 import {
@@ -9,6 +17,7 @@ import {
   DisabledEditingMovementContext,
   DataViewerModeContext,
   AvailableDashboardsContext,
+  TabContext,
 } from "components/contexts/Contexts";
 import Error from "components/error/Error";
 import errorImage from "assets/error404.png";
@@ -28,13 +37,15 @@ const DashboardLoader = ({
   const [isLoaded, setIsLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [variableInputValues, setVariableInputValues] = useState({});
-  const [gridItems, setGridItems] = useState([]);
+  const [variableInputDateFormats, setVariableInputDateFormats] = useState({});
+  const [tabs, setTabs] = useState([]);
+  const [activeTabId, setActiveTabId] = useState(null);
   const [notes, setNotes] = useState([]);
   const [isEditing, setIsEditing] = useState(false);
   const [disabledEditingMovement, setDisabledEditingMovement] = useState(false);
   const [inDataViewerMode, setInDataViewerMode] = useState(false);
   const { updateDashboard } = useContext(AvailableDashboardsContext);
-  const originalGridItems = useRef({});
+  const originalTabs = useRef({});
   const editable = ["admin", "editor"].includes(userPermission);
 
   useEffect(() => {
@@ -42,9 +53,11 @@ const DashboardLoader = ({
       try {
         const response = await appAPI.getDashboard({ id });
         if (response.success) {
-          updateGridItems(response.dashboard.gridItems);
-          originalGridItems.current = response.dashboard.gridItems;
+          updateVariableInputValuesWithGridItems(response.dashboard.tabs);
+          originalTabs.current = response.dashboard.tabs;
           setNotes(response.dashboard.notes);
+          setTabs(response.dashboard.tabs);
+          setActiveTabId(response.dashboard.tabs[0].id);
           setIsLoaded(true);
         } else {
           setLoadError(true);
@@ -64,50 +77,223 @@ const DashboardLoader = ({
     }
   }, [isEditing]);
 
-  function updateVariableInputValuesWithGridItems(updatedGridItems) {
-    const updatedVariableInputValues = JSON.parse(
-      JSON.stringify(variableInputValues)
-    );
-    for (let gridItem of updatedGridItems) {
-      const args = JSON.parse(gridItem.args_string);
+  const updateVariableInputValuesWithGridItems = useCallback(
+    (updatedTabs) => {
+      let updatedVariableInputValues = {};
+      let updatedVariableInputDateFormats = {};
+      // update to use any date range values as well
+      // when a griditem is deleted, I want to remove its variable inputs as well
 
-      if (gridItem.source === "Variable Input") {
-        if (!(args.variable_name in variableInputValues)) {
-          let initialValue = args.initial_value;
-          if (
-            args.variable_options_source === "checkbox" &&
-            args.initial_value === null
-          ) {
-            initialValue = false;
+      for (let tab of updatedTabs) {
+        for (let gridItem of tab.gridItems) {
+          const args = JSON.parse(gridItem.args_string);
+
+          if (gridItem.source === "Variable Input") {
+            const allInitialValues = {
+              [args.variable_name]: args.initial_value,
+            };
+            if (args.initial_value && typeof args.initial_value === "object") {
+              for (let [key, value] of Object.entries(args.initial_value)) {
+                allInitialValues[key] = value;
+              }
+            }
+
+            for (let [key, value] of Object.entries(allInitialValues)) {
+              let initialValue =
+                variableInputValues[key] === undefined
+                  ? value
+                  : variableInputValues[key];
+
+              if (
+                args.variable_options_source === "checkbox" &&
+                initialValue === null
+              ) {
+                initialValue = false;
+              }
+
+              let dateFormat;
+              if (args.variable_options_source.includes("date")) {
+                dateFormat =
+                  args?.["variable_options_source.metadata"]?.format || "";
+              } else if (args.variable_options_source === "slider") {
+                dateFormat =
+                  args["variable_options_source.metadata"].outputFormat;
+              }
+
+              updatedVariableInputValues[key] = initialValue;
+              if (dateFormat) {
+                updatedVariableInputDateFormats[key] = dateFormat;
+              }
+            }
           }
-          updatedVariableInputValues[args.variable_name] = initialValue;
         }
       }
-    }
-    setVariableInputValues(updatedVariableInputValues);
-  }
+      setVariableInputValues(updatedVariableInputValues);
+      setVariableInputDateFormats(updatedVariableInputDateFormats);
+    },
+    [variableInputValues],
+  );
 
-  function updateGridItems(updatedGridItems) {
-    setGridItems(updatedGridItems);
-    updateVariableInputValuesWithGridItems(updatedGridItems);
-  }
-
-  function resetGridItems() {
-    setGridItems(originalGridItems.current);
-    updateVariableInputValuesWithGridItems(originalGridItems.current);
-  }
-
-  async function saveLayoutContext(newProperties) {
-    const apiResponse = await updateDashboard({ id, newProperties });
-    if (apiResponse["success"]) {
-      const updatedDashboard = apiResponse.updated_dashboard;
-      if ("gridItems" in newProperties) {
-        setGridItems(updatedDashboard.gridItems);
-        originalGridItems.current = updatedDashboard.gridItems;
+  const updateTab = useCallback(
+    (tabId, updatedProperties) => {
+      setTabs((prevTabs) =>
+        prevTabs.map((tab) =>
+          tab.id === tabId ? { ...tab, ...updatedProperties } : tab,
+        ),
+      );
+      if ("gridItems" in updatedProperties) {
+        updateVariableInputValuesWithGridItems([updatedProperties]);
       }
-    }
-    return apiResponse;
-  }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tabs, activeTabId, variableInputValues],
+  );
+
+  const resetTabs = useCallback(() => {
+    setTabs(originalTabs.current);
+    setActiveTabId(originalTabs.current[0].id);
+    updateVariableInputValuesWithGridItems(originalTabs.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [originalTabs]);
+
+  const saveLayoutContext = useCallback(
+    async (newProperties) => {
+      const apiResponse = await updateDashboard({ id, newProperties });
+      if (apiResponse["success"]) {
+        const updatedDashboard = apiResponse.updated_dashboard;
+        if ("tabs" in newProperties) {
+          const originalActiveTabIndex = tabs.findIndex(
+            (tab) => tab.id === activeTabId,
+          );
+          setTabs(updatedDashboard.tabs);
+          originalTabs.current = updatedDashboard.tabs;
+          setActiveTabId(updatedDashboard.tabs[originalActiveTabIndex].id);
+        }
+      }
+      return apiResponse;
+    },
+    [updateDashboard, id, tabs, activeTabId],
+  );
+
+  const addTab = useCallback(() => {
+    const tabName = `Tab ${tabs.length + 1}`;
+    const newTab = {
+      id: tabName,
+      order: tabs.length,
+      gridItems: [],
+      name: tabName,
+    };
+    setTabs([...tabs, newTab]);
+    setActiveTabId(newTab.id);
+  }, [tabs]);
+
+  const deleteTab = useCallback(
+    (tabId) => {
+      const newTabs = tabs.filter((tab) => tab.id !== tabId);
+      setTabs(newTabs);
+      if (activeTabId === tabId && newTabs.length > 0) {
+        setActiveTabId(newTabs[0].id);
+      }
+    },
+    [tabs, activeTabId],
+  );
+
+  const reorderTabs = useCallback(
+    (newOrder) => {
+      setTabs(newOrder);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tabs],
+  );
+
+  const getActiveTab = useCallback(
+    () => tabs.find((tab) => tab.id === activeTabId),
+    [tabs, activeTabId],
+  );
+
+  const getTab = useCallback(
+    (tabId) => tabs.find((tab) => tab.id === tabId),
+    [tabs],
+  );
+
+  // Always call hooks in the same order
+  const variableInputsContextValue = useMemo(
+    () => ({
+      variableInputValues,
+      setVariableInputValues,
+      variableInputDateFormats,
+    }),
+    [variableInputValues, setVariableInputValues, variableInputDateFormats],
+  );
+
+  const tabContextValue = useMemo(
+    () => ({
+      tabs,
+      activeTabId,
+      setActiveTabId,
+      addTab,
+      updateTab,
+      deleteTab,
+      reorderTabs,
+      resetTabs,
+      getActiveTab,
+      getTab,
+    }),
+    [
+      tabs,
+      activeTabId,
+      addTab,
+      updateTab,
+      deleteTab,
+      reorderTabs,
+      resetTabs,
+      getActiveTab,
+      getTab,
+      setActiveTabId,
+    ],
+  );
+  const layoutContextValue = useMemo(
+    () => ({
+      saveLayoutContext,
+      id,
+      uuid,
+      name,
+      notes,
+      editable,
+      publicDashboard,
+      userPermission,
+      permissions,
+      unrestrictedPlacement,
+      description,
+      owner,
+    }),
+    [
+      saveLayoutContext,
+      id,
+      uuid,
+      name,
+      notes,
+      editable,
+      publicDashboard,
+      userPermission,
+      permissions,
+      unrestrictedPlacement,
+      description,
+      owner,
+    ],
+  );
+  const editingContextValue = useMemo(
+    () => ({ isEditing, setIsEditing }),
+    [isEditing, setIsEditing],
+  );
+  const disabledEditingMovementContextValue = useMemo(
+    () => ({ disabledEditingMovement, setDisabledEditingMovement }),
+    [disabledEditingMovement, setDisabledEditingMovement],
+  );
+  const dataViewerModeContextValue = useMemo(
+    () => ({ inDataViewerMode, setInDataViewerMode }),
+    [inDataViewerMode, setInDataViewerMode],
+  );
 
   if (loadError) {
     return (
@@ -115,56 +301,29 @@ const DashboardLoader = ({
         The dashboard failed to load. Please try again or contact admins.
       </Error>
     );
-  } else if (!isLoaded) {
-    return <LoadingAnimation />;
-  } else {
-    return (
-      <VariableInputsContext.Provider
-        value={{
-          variableInputValues,
-          setVariableInputValues,
-        }}
-      >
-        <LayoutContext.Provider
-          value={{
-            updateGridItems,
-            resetGridItems,
-            saveLayoutContext,
-            id,
-            uuid,
-            name,
-            notes,
-            gridItems,
-            editable,
-            publicDashboard,
-            userPermission,
-            permissions,
-            unrestrictedPlacement,
-            description,
-            owner,
-          }}
-        >
-          <EditingContext.Provider value={{ isEditing, setIsEditing }}>
+  }
+  if (!isLoaded) {
+    return <LoadingAnimation text="Loading Dashboard..." />;
+  }
+  return (
+    <VariableInputsContext.Provider value={variableInputsContextValue}>
+      <TabContext.Provider value={tabContextValue}>
+        <LayoutContext.Provider value={layoutContextValue}>
+          <EditingContext.Provider value={editingContextValue}>
             <DisabledEditingMovementContext.Provider
-              value={{
-                disabledEditingMovement,
-                setDisabledEditingMovement,
-              }}
+              value={disabledEditingMovementContextValue}
             >
               <DataViewerModeContext.Provider
-                value={{
-                  inDataViewerMode,
-                  setInDataViewerMode,
-                }}
+                value={dataViewerModeContextValue}
               >
                 {children}
               </DataViewerModeContext.Provider>
             </DisabledEditingMovementContext.Provider>
           </EditingContext.Provider>
         </LayoutContext.Provider>
-      </VariableInputsContext.Provider>
-    );
-  }
+      </TabContext.Provider>
+    </VariableInputsContext.Provider>
+  );
 };
 
 DashboardLoader.propTypes = {
@@ -187,7 +346,7 @@ DashboardLoader.propTypes = {
       username: PropTypes.string,
       group: PropTypes.string,
       permission: PropTypes.string.isRequired,
-    })
+    }),
   ),
   owner: PropTypes.string,
 };

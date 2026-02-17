@@ -1035,14 +1035,16 @@ test("DashboardCard editable, export", async () => {
     .spyOn(utils, "downloadJSONFile")
     .mockImplementation(jest.fn());
   const downloadedDashboard = JSON.parse(JSON.stringify(userDashboard));
-  downloadedDashboard.gridItems[0].args_string = JSON.parse(
-    userDashboard.gridItems[0].args_string
+  downloadedDashboard.tabs[0].gridItems[0].args_string = JSON.parse(
+    userDashboard.tabs[0].gridItems[0].args_string
   );
-  downloadedDashboard.gridItems[0].metadata_string = JSON.parse(
-    userDashboard.gridItems[0].metadata_string
+  downloadedDashboard.tabs[0].gridItems[0].metadata_string = JSON.parse(
+    userDashboard.tabs[0].gridItems[0].metadata_string
   );
   delete downloadedDashboard.id;
   delete downloadedDashboard.uuid;
+  delete downloadedDashboard.tabs[0].gridItems[0].id;
+  delete downloadedDashboard.tabs[0].gridItems[0].uuid;
 
   render(
     createLoadedComponent({
@@ -1114,14 +1116,16 @@ test("DashboardCard editable, export fail", async () => {
       throw new Error();
     });
   const downloadedDashboard = JSON.parse(JSON.stringify(userDashboard));
-  downloadedDashboard.gridItems[0].args_string = JSON.parse(
-    userDashboard.gridItems[0].args_string
+  downloadedDashboard.tabs[0].gridItems[0].args_string = JSON.parse(
+    userDashboard.tabs[0].gridItems[0].args_string
   );
-  downloadedDashboard.gridItems[0].metadata_string = JSON.parse(
-    userDashboard.gridItems[0].metadata_string
+  downloadedDashboard.tabs[0].gridItems[0].metadata_string = JSON.parse(
+    userDashboard.tabs[0].gridItems[0].metadata_string
   );
   delete downloadedDashboard.id;
   delete downloadedDashboard.uuid;
+  delete downloadedDashboard.tabs[0].gridItems[0].id;
+  delete downloadedDashboard.tabs[0].gridItems[0].uuid;
 
   render(
     createLoadedComponent({

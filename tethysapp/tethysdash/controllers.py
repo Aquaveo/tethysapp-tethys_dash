@@ -25,14 +25,24 @@ from tethysapp.tethysdash.model import (
     get_visualization_permissions,
     get_user_app_permissions,
     update_visualization_permissions as update_viz_perms,
+    check_for_liveChat,
+    Message,
 )
+from django.core.cache import cache
 from tethysapp.tethysdash.visualizations import (
     get_available_visualizations,
     get_visualization,
     get_restricted_visualizations,
 )
 from tethysapp.tethysdash.exceptions import VisualizationError
-from pathlib import Path
+from tethysapp.tethysdash.plugin_helpers import send_websocket_message
+from channels.generic.websocket import AsyncWebsocketConsumer
+from tethys_sdk.routing import consumer
+from asgiref.sync import sync_to_async
+from better_profanity import profanity
+
+# Load the default wordlist
+profanity.load_censor_words()
 
 
 @controller(login_required=False)
@@ -132,7 +142,10 @@ def ping(request):
     except NameError:
         # This is caused by trying to use a function that doesn't exist
         # Useful for resetting a website that used to have the session security.
-        delattr(request, "session")
+        try:
+            del request.session
+        except AttributeError:
+            pass
         print(
             "Deleting session information due to django-session-security being uninstalled."  # noqa: E501
         )
@@ -161,12 +174,15 @@ def visualization(request):
     """
     viz_source = request.GET["source"]
     viz_args = json.loads(request.GET["args"])
+    viz_request_id = request.GET["requestId"]
     data = None
     viz_type = None
     success = True
 
     try:
-        viz_type, data = get_visualization(viz_source, viz_args, request.user)
+        viz_type, data = get_visualization(
+            viz_source, viz_args, request.user, viz_request_id
+        )
     except VisualizationError as e:
         print(f"VisualizationError: {e}")
         data = {"error": str(e)}
@@ -195,15 +211,28 @@ def dashboards(request):
         JsonResponse: Dictionary containing:
             - dashboards: List of dashboard objects accessible to the user
             - permission_groups: List of permission groups for the user
+            - support_info: Dictionary containing support email and GitHub URL
     """
     user = request.user
-    dashboards = get_dashboards(user)
-    permission_groups = get_user_permission_groups(user)
-    clean_up_jsons(user)
+    response = {
+        "dashboards": get_dashboards(user),
+        "permission_groups": get_user_permission_groups(user),
+    }
 
-    return JsonResponse(
-        {"dashboards": dashboards, "permission_groups": permission_groups}
-    )
+    support_info = {}
+    support_email = App.get_custom_setting("support_email")
+    support_github = App.get_custom_setting("support_github")
+
+    if support_email:
+        support_info["support_email"] = support_email
+    if support_github:
+        support_info["support_github"] = support_github
+
+    if support_info:
+        response["support_info"] = support_info
+
+    clean_up_jsons(user)
+    return JsonResponse(response)
 
 
 @api_view(["GET"])
@@ -224,6 +253,214 @@ def visualizations(request):
     visualizations = get_available_visualizations(request.user)
 
     return JsonResponse(visualizations)
+
+
+@consumer(
+    name="visualization_notifications", url="tethysdash/visualizations/notifications/"
+)
+class VisualizationConsumer(AsyncWebsocketConsumer):
+    """
+    WebSocket consumer for real-time visualization notifications and chat.
+
+    Handles WebSocket connections for dashboard updates, chat messaging, and
+    rate limiting.
+    Messages are censored for profanity and persisted to the database. Supports
+    message editing and sender updates.
+    """
+
+    async def connect(self):
+        """
+        Handles a new WebSocket connection.
+
+        Adds the connection to the 'dashboard_updates' group and accepts the connection.
+        """
+        # Add to groups
+        await self.channel_layer.group_add("dashboard_updates", self.channel_name)
+
+        await self.accept()
+
+    async def disconnect(self, code):
+        """
+        Handles WebSocket disconnection.
+
+        Removes the connection from the 'dashboard_updates' group.
+        Args:
+            code (int): The close code for the disconnect event.
+        """
+        await self.channel_layer.group_discard("dashboard_updates", self.channel_name)
+
+    async def receive(self, text_data=None, bytes_data=None):
+        """
+        Handles incoming WebSocket messages.
+
+        Expects JSON-formatted messages with 'requestId', 'message', and optional
+        metadata.
+        Applies rate limiting, profanity filtering, and persists messages to the
+        database.
+        Broadcasts messages to the group and handles message edits.
+
+        Args:
+            text_data (str, optional): JSON string containing the message data.
+            bytes_data (bytes, optional): Not used.
+        """
+        print(text_data)
+        try:
+            data = json.loads(text_data)
+            request_id = data["requestId"]
+            message = data["message"]
+            session_id = data["sessionId"]
+            sender = data["sender"]
+        except Exception as e:
+            print(e)
+            await self.send(
+                json.dumps(
+                    {
+                        "error": "Invalid message format. requestId, message, sessionId, and sender required."  # noqa: E501
+                    }
+                )
+            )
+            return
+
+        valid_liveChat = await sync_to_async(check_for_liveChat)(request_id)
+        if not valid_liveChat:
+            await self.send(json.dumps({"error": "Invalid liveChat request ID."}))
+            return
+
+        messageId = data.get("messageId", None)
+        censored_message = profanity.censor(message)
+        timestamp = datetime.utcnow()
+
+        rate_key = f"chat_rate_{request_id}_{session_id}"
+        count = cache.get(rate_key, 0)
+        if count >= 5:
+            # Try to get the remaining time until the rate limit resets
+            retry_after = 10  # Default fallback
+            try:
+                # Django cache backends may support .ttl(), but not all do
+                retry_after = cache.ttl(rate_key)
+                if retry_after is None:
+                    retry_after = 10
+            except Exception:
+                retry_after = 10
+            await self.send(
+                json.dumps(
+                    {
+                        "error": f"Rate limit exceeded. Please wait {retry_after} seconds before sending more messages.",  # noqa: E501
+                        "requestId": request_id,
+                        "messageId": messageId,
+                    }
+                )
+            )
+            return
+
+        if count == 0:
+            cache.set(rate_key, 1, timeout=10)  # 10 seconds window
+        else:
+            cache.incr(rate_key)
+
+        try:
+            # Broadcast the message (include messageId)
+            await sync_to_async(send_websocket_message)(
+                request_id,
+                censored_message,
+                sender=sender,
+                sessionId=session_id,
+                timestamp=timestamp.isoformat() + "Z",
+                messageId=messageId,
+            )
+        except Exception as e:
+            print(e)
+            await self.send(
+                json.dumps(
+                    {
+                        "error": "Failed to broadcast message.",
+                        "requestId": request_id,
+                        "messageId": messageId,
+                    }
+                )
+            )
+            return
+
+        def save_message():
+            Session = App.get_persistent_store_database(
+                "primary_db", as_sessionmaker=True
+            )
+            db_session = Session()
+            try:
+                previous_messages = (
+                    db_session.query(Message)
+                    .filter_by(
+                        session_id=session_id,
+                        request_id=request_id,
+                    )
+                    .all()
+                )
+
+                # If any prev message has a different sender, update all to new sender
+                if previous_messages and any(
+                    m.sender != sender for m in previous_messages
+                ):
+                    for m in previous_messages:
+                        m.sender = sender
+
+                # If messageId is provided, try to update the existing message
+                if messageId:
+                    existing_message = (
+                        db_session.query(Message)
+                        .filter_by(
+                            message_id=messageId,
+                            request_id=request_id,
+                            session_id=session_id,
+                        )
+                        .first()
+                    )
+                    if existing_message:
+                        # Update the existing message
+                        existing_message.timestamp = timestamp
+                        existing_message.sender = sender
+                        existing_message.message = censored_message
+                        existing_message.edited = True
+                        db_session.commit()
+                        return
+
+                db_session.add(
+                    Message(
+                        timestamp=timestamp,
+                        request_id=request_id,
+                        session_id=session_id,
+                        sender=sender,
+                        message=censored_message,
+                        message_id=messageId,
+                    )
+                )
+                db_session.commit()
+            finally:
+                db_session.close()
+
+        try:
+            await sync_to_async(save_message)()
+        except Exception as e:
+            print(e)
+            await self.send(
+                json.dumps(
+                    {
+                        "error": "Failed to save message.",
+                        "requestId": request_id,
+                        "messageId": messageId,
+                    }
+                )
+            )
+            return
+
+    async def send_message(self, event):
+        """
+        Sends a message to the WebSocket client.
+
+        Args:
+            event (dict): Event containing the message payload under the 'message' key.
+        """
+        message = event["message"]
+        await self.send(json.dumps(message))
 
 
 @api_view(["GET"])
@@ -272,7 +509,6 @@ def visualization_permissions(request):
     )
 
 
-@api_view(["POST"])
 @controller(url="tethysdash/visualizations/permissions/update", login_required=True)
 def update_visualization_permissions(request):
     """
@@ -379,9 +615,10 @@ def add_dashboard(request, app_media):
     notes = dashboard_metadata.get("notes", "")
     public = dashboard_metadata.get("public", False)
     unrestricted_placement = dashboard_metadata.get("unrestrictedPlacement", False)
+    tabs = dashboard_metadata.get("tabs", [])
     grid_items = dashboard_metadata.get("gridItems", [])
     owner = request.user
-    dashboard_uuid = str(uuid.uuid4())
+    dashboard_uuid = dashboard_metadata.get("uuid", str(uuid.uuid4()))
     print(f"Creating a dashboard named {name}")
 
     try:
@@ -394,6 +631,7 @@ def add_dashboard(request, app_media):
             public,
             unrestricted_placement,
             grid_items,
+            tabs,
         )
 
         dashboard_image = os.path.join(
@@ -695,32 +933,25 @@ def upload_json(request, app_workspace):
     """
 
     json_data = json.loads(request.body)
-    user = request.user
 
     data = json_data["data"]
     filename = json_data["filename"]
+    dashboard_uuid = json_data["dashboard_uuid"]
     clean_data = nh3.clean(data)
-    json_folder = os.path.join(app_workspace.path, "json")
     print(f"Uploading {filename}")
 
     try:
-        if not os.path.exists(json_folder):
-            os.mkdir(json_folder)
+        dashboard_folder = os.path.join(app_workspace.path, dashboard_uuid)
+        if not os.path.exists(dashboard_folder):
+            os.mkdir(dashboard_folder)
 
-        json_file = os.path.join(json_folder, filename)
-        # Writing to sample.json
-        with open(json_file, "w") as outfile:
+        dashboard_file = os.path.join(dashboard_folder, filename)
+        with open(dashboard_file, "w") as outfile:
             outfile.write(clean_data)
 
-        json_user_folder = os.path.join(json_folder, user.username)
-        if not os.path.exists(json_user_folder):
-            os.mkdir(json_user_folder)
-
-        json_user_file = os.path.join(json_user_folder, filename)
-        Path(json_user_file).touch()
         return JsonResponse({"success": True, "filename": filename})
+
     except Exception as e:
-        print(e)
         try:
             message = e.args[0]
         except Exception:
@@ -749,13 +980,14 @@ def download_json(request, app_workspace):
             - message: Error message if unsuccessful
     """
     filename = request.GET["filename"]
-    json_folder = os.path.join(app_workspace.path, "json")
+    dashboard_uuid = request.GET["dashboard_uuid"]
+    dashboard_folder = os.path.join(app_workspace.path, dashboard_uuid)
     print(f"Getting data from {filename}")
 
     try:
-        json_user_file = os.path.join(json_folder, filename)
+        dashboard_file = os.path.join(dashboard_folder, filename)
         # Writing to sample.json
-        with open(json_user_file, "r") as file:
+        with open(dashboard_file, "r") as file:
             data = json.load(file)
             data = json.loads(nh3.clean(json.dumps(data)))
 

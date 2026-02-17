@@ -1,16 +1,24 @@
 import { useState, useEffect, useRef, memo } from "react";
 import { Confirmation } from "components/inputs/Confirmation";
 import Form from "react-bootstrap/Form";
-import { getTethysPortalHost } from "services/utilities";
+import { getTethysPortalBase } from "services/utilities";
 import PropTypes from "prop-types";
 import { useIdleTimer } from "react-idle-timer";
 import appAPI from "services/api/app";
 import tethysAPI from "services/api/tethys";
+import { useModalPriority } from "components/contexts/ModalPriorityContext";
 
 // This controls how often the API is called for activity
 const SESSION_PING_FREQUENCY = process.env.REACT_SESSION_PING_FREQUENCY;
 
 function IdleTimerManager() {
+  const {
+    setShowingPublicUserModal,
+    setPublicUserModalChecked,
+    setShowingIdleTimeoutModal,
+    appInfoModalWasOpen,
+    setAppInfoModalWasOpen,
+  } = useModalPriority();
   const [showRedirectPublicUserModal, setShowRedirectPublicUserModal] =
     useState(false);
   const [checked, setChecked] = useState(false);
@@ -26,12 +34,14 @@ function IdleTimerManager() {
   const dontShowPublicLoginOnStart = localStorage.getItem(
     "dontShowPublicLoginOnStart"
   );
-  const TETHYS_PORTAL_HOST = getTethysPortalHost();
+  const TETHYS_PORTAL_BASE = getTethysPortalBase();
 
   useEffect(() => {
     const loadAppData = async () => {
       try {
         await tethysAPI.getSession();
+        // User is authenticated, no need to show public user modal
+        setPublicUserModalChecked(true);
       } catch (error) {
         if (error.response.status === 401) {
           if (
@@ -39,7 +49,10 @@ function IdleTimerManager() {
             !dontShowPublicLoginOnStart
           ) {
             setShowRedirectPublicUserModal(true);
+            setShowingPublicUserModal(true);
           }
+          // Mark as checked even if not showing (user has opted out)
+          setPublicUserModalChecked(true);
         }
       }
     };
@@ -55,9 +68,16 @@ function IdleTimerManager() {
     });
   };
 
-  const onIdle = () => {
+  const onIdle = async () => {
+    // First, ensure the session is ended on the backend
+    try {
+      await appAPI.getActivityData({ idleFor: sessionSecurityExpire + 1 });
+    } catch (error) {
+      // Ignore errors, we're logging out anyway
+    }
+    // Then redirect to logout, which will then redirect to login
     window.location.assign(
-      `${TETHYS_PORTAL_HOST}/accounts/login?next=${window.location.pathname}`
+      `${TETHYS_PORTAL_BASE}/accounts/logout/?next=${TETHYS_PORTAL_BASE}/accounts/login?next=${window.location.pathname}`
     );
     setShowActivePrompt(false);
   };
@@ -70,6 +90,7 @@ function IdleTimerManager() {
   const onPrompt = () => {
     setCount(0);
     setShowActivePrompt(true);
+    setShowingIdleTimeoutModal(true);
   };
 
   const { getRemainingTime, activate, pause } = useIdleTimer({
@@ -108,7 +129,7 @@ function IdleTimerManager() {
         if (response.status === -2) {
           // The user has been signed out
           window.location.assign(
-            `${TETHYS_PORTAL_HOST}/accounts/login?next=${window.location.pathname}`
+            `${TETHYS_PORTAL_BASE}/accounts/login?next=${window.location.pathname}`
           );
         } else if (response.status === 2 || response.status === -1) {
           // (2) Pause the IdleTimer as it's not going to do anything for a public user
@@ -131,9 +152,14 @@ function IdleTimerManager() {
       }
     };
 
-    callAPI();
+    if (count > 0) {
+      callAPI();
+    } else if (count === 0 && renderedOnce.current === false) {
+      // Initial load
+      callAPI();
+    }
     // eslint-disable-next-line
-  }, []);
+  }, [count]);
 
   const handleDontShow = (e) => {
     setChecked(e.target.checked);
@@ -143,17 +169,26 @@ function IdleTimerManager() {
   const handlePublicUser = (confirmation) => {
     if (!confirmation) {
       window.location.assign(
-        `${TETHYS_PORTAL_HOST}/accounts/login?next=${window.location.pathname}`
+        `${TETHYS_PORTAL_BASE}/accounts/login?next=${window.location.pathname}`
       );
       return;
     }
     setShowRedirectPublicUserModal(false);
+    setShowingPublicUserModal(false);
   };
 
-  const handleStillHere = (active) => {
-    if (active) {
-      onActive();
-      activate();
+  const handleStillHere = () => {
+    // Increment count to trigger API call to keep session alive
+    setCount((prevCount) => prevCount + 1);
+    onActive();
+    activate();
+    setShowingIdleTimeoutModal(false);
+    // Reopen AppInfo modal if it was open before
+    if (appInfoModalWasOpen) {
+      // Small delay to ensure smooth transition
+      setTimeout(() => {
+        setAppInfoModalWasOpen(true); // Keep it true to trigger reopening in Header
+      }, 100);
     }
   };
 
