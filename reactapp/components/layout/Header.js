@@ -4,8 +4,8 @@ import { useNavigate } from "react-router-dom";
 import Container from "react-bootstrap/Container";
 import Spinner from "react-bootstrap/Spinner";
 import styled from "styled-components";
-import Cw3eHeader from "./cw3eHeader";import { useModalPriority } from "components/contexts/ModalPriorityContext";
-
+import Cw3eHeader from "./cw3eHeader";
+import { useModalPriority } from "components/contexts/ModalPriorityContext";
 import {
   LayoutContext,
   EditingContext,
@@ -165,7 +165,7 @@ export const LandingPageHeader = () => {
       <CustomDiv className="d-flex flex-column position-absolute">
         <Container fluid className="px-2 d-flex justify-content-end">
           <div className="d-flex flex-column align-items-center gap-2">
-            {user?.username && (
+            {user?.username ? (
               <>
                 {allowedToManageVisualizations && (
                   <TooltipButton
@@ -426,7 +426,6 @@ export const DashboardHeader = () => {
   return (
     <>
       <Cw3eHeader />
-
       <WhiteTitle>{name}</WhiteTitle>
       <CustomDiv className="d-flex flex-column position-absolute">
         <Container
